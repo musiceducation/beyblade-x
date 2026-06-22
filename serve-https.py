@@ -2,6 +2,7 @@
 """HTTPS static server for phone camera (getUserMedia requires secure context)."""
 import http.server
 import os
+import socket
 import ssl
 import subprocess
 import sys
@@ -10,6 +11,17 @@ DIR = os.path.dirname(os.path.abspath(__file__))
 PORT = 8443
 CERT = os.path.join(DIR, 'cert.pem')
 KEY = os.path.join(DIR, 'key.pem')
+
+
+def get_lan_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except OSError:
+        return None
 
 
 def ensure_cert():
@@ -32,8 +44,14 @@ def main():
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(CERT, KEY)
     httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
-    print(f'HTTPS: https://0.0.0.0:{PORT}/')
-    print('Phone camera links use this port. Accept the certificate warning on phone first.')
+    lan = get_lan_ip()
+    print(f'HTTPS server: https://0.0.0.0:{PORT}/')
+    if lan:
+        print(f'')
+        print(f'  主機開啟：  https://{lan}:{PORT}/')
+        print(f'  選「手機/平板」→ 掃 QR 即可')
+        print(f'')
+    print('首次請在電腦與手機瀏覽器接受憑證警告。')
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

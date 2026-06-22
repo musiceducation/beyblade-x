@@ -1336,6 +1336,37 @@ body.launch-active .rec-badge {
   letter-spacing: 0.15em;
 }
 
+.remote-quick-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--blue);
+  margin: 0 0 0.35rem;
+}
+
+.remote-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+}
+
+.cam-hint-compact {
+  font-size: 0.68rem;
+  opacity: 0.75;
+  word-break: break-all;
+}
+
+.remote-help {
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.remote-help summary {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
 .remote-status {
   margin-top: 0.35rem;
   font-size: 0.8rem;

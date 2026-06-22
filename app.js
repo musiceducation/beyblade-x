@@ -1015,6 +1015,7 @@ function setRemoteStatus(msg, ok) {
     el.textContent = msg;
     el.style.color = ok ? 'var(--blue)' : ok === false ? 'var(--red)' : '';
   }
+  updateRemoteCamButtons();
 }
 
 async function prepareRemoteRoom(forceNew = false) {
@@ -1042,10 +1043,27 @@ async function prepareRemoteRoom(forceNew = false) {
 function updateRemoteQrDisplay() {
   if (!state.remoteRoomId) return;
   $('#remote-room-code').textContent = state.remoteRoomId;
-  $('#remote-link-text').textContent = state.remoteLink || '';
+  const linkEl = $('#remote-link-text');
+  if (linkEl) linkEl.textContent = state.remoteLink ? state.remoteLink : '';
   if (state.remoteLink && !state.remoteLink.includes('[主機IP]')) {
     $('#remote-qr').src =
-      `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(state.remoteLink)}`;
+      `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(state.remoteLink)}`;
+  }
+  updateRemoteCamButtons();
+}
+
+function updateRemoteCamButtons() {
+  const startBtn = $('#btn-cam-start');
+  if (!startBtn || $('#cam-source').value !== 'remote') return;
+  if (state.cameraStream && state.cameraStream.getTracks) {
+    startBtn.textContent = '已連線';
+    startBtn.disabled = true;
+  } else if (isHostPeerReady()) {
+    startBtn.textContent = '等待手機掃 QR';
+    startBtn.disabled = true;
+  } else {
+    startBtn.textContent = '連接鏡頭';
+    startBtn.disabled = false;
   }
 }
 
@@ -1137,6 +1155,7 @@ function showCameraActive(useVideo) {
   $('#rec-badge').hidden = false;
   $('#btn-cam-start').disabled = true;
   $('#btn-cam-stop').disabled = false;
+  updateRemoteCamButtons();
 }
 
 function hideCameraFeed() {
@@ -1152,6 +1171,7 @@ function hideCameraFeed() {
   $('#rec-badge').hidden = true;
   $('#btn-cam-start').disabled = false;
   $('#btn-cam-stop').disabled = true;
+  updateRemoteCamButtons();
 }
 
 async function listCameras() {
@@ -1221,7 +1241,7 @@ async function ensureRemoteHostPeer() {
   }
   if (!state.remoteRoomId) await prepareRemoteRoom(false);
   if (isHostPeerReady()) {
-    setRemoteStatus(`主機已就緒 — 房間碼 ${state.remoteRoomId}，等待手機連線`, true);
+    setRemoteStatus(`等待手機掃 QR（房間 ${state.remoteRoomId}）`, true);
     return;
   }
   await startRemoteCamera(true);
@@ -1243,21 +1263,21 @@ async function startRemoteCamera(retrySameRoom = false) {
   }
 
   if (isHostPeerReady()) {
-    setRemoteStatus(`主機已就緒 — 房間碼 ${state.remoteRoomId}，等待手機連線`, true);
+    setRemoteStatus(`等待手機掃 QR（房間 ${state.remoteRoomId}）`, true);
     return;
   }
 
   destroyCameraPeer();
 
   const hostId = hostPeerId(state.remoteRoomId);
-  setRemoteStatus('等待手機連線…（請掃 QR 或開連結）');
+  setRemoteStatus('正在就緒…');
 
   return new Promise((resolve, reject) => {
     state.cameraPeer = new Peer(hostId, PEER_CONFIG);
 
     state.cameraPeer.on('open', () => {
-      setRemoteStatus(`主機已就緒 — 房間碼 ${state.remoteRoomId}，請手機按「開啟鏡頭並連線」`, true);
-      addLog(`手機鏡頭房間 ${state.remoteRoomId} 已上線 — 等待手機`);
+      setRemoteStatus(`等待手機掃 QR（房間 ${state.remoteRoomId}）`, true);
+      addLog(`手機鏡頭房間 ${state.remoteRoomId} 已就緒 — 掃 QR 即可連線`);
       resolve();
     });
 
@@ -1323,17 +1343,17 @@ async function startCamera() {
     if (mode === 'remote') {
       await prepareRemoteRoom(false);
       stopCamera(false, true);
-    } else {
-      stopCamera(false);
       updateCamSourcePanels();
+      await ensureRemoteHostPeer();
+      return;
     }
+
+    stopCamera(false);
+    updateCamSourcePanels();
 
     if (mode === 'local') {
       await startLocalCamera();
-    } else if (mode === 'remote') {
-      await ensureRemoteHostPeer();
     } else if (mode === 'url') {
-      updateCamSourcePanels();
       startUrlCamera();
     }
   } catch (err) {
@@ -1361,6 +1381,7 @@ function stopCamera(resetUi = true, keepPeer = false) {
 
   if (resetUi) hideCameraFeed();
   setRemoteStatus('已中斷連線');
+  updateRemoteCamButtons();
 }
 
 function applyMirror() {
@@ -1441,6 +1462,9 @@ function init() {
   $('#cam-mirror').addEventListener('change', applyMirror);
   $('#cam-source').addEventListener('change', () => {
     updateCamSourcePanels();
+    if ($('#cam-source').value === 'remote') {
+      switchAppView('camera');
+    }
   });
   $('#cam-device').addEventListener('change', () => {
     if (state.cameraStream && state.cameraMode === 'local') startCamera();

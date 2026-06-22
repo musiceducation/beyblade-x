@@ -24,23 +24,26 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 1rem;
+      justify-content: center;
+      padding: 1.25rem;
       gap: 1rem;
     }
-    h1 { font-size: 1.1rem; letter-spacing: 0.05em; text-align: center; }
+    h1 { font-size: 1.05rem; letter-spacing: 0.05em; text-align: center; }
     .status {
       text-align: center;
-      font-size: 0.95rem;
+      font-size: 1rem;
+      font-weight: 600;
       color: #8892a8;
-      min-height: 1.5em;
+      min-height: 2.5em;
       max-width: 420px;
       line-height: 1.45;
     }
     .status.ok { color: #00d4ff; }
     .status.err { color: #ff2d55; }
+    .status.wait { color: #ffd60a; }
     .secure-warn {
       background: rgba(255, 45, 85, 0.12);
-      border: 1px solid var(--red, #ff2d55);
+      border: 1px solid #ff2d55;
       border-radius: 10px;
       padding: 0.85rem;
       font-size: 0.85rem;
@@ -59,6 +62,7 @@
       object-fit: cover;
     }
     video.mirrored { transform: scaleX(-1); }
+    video.hidden-preview { opacity: 0.35; }
     .btn {
       font-family: inherit;
       font-size: 1rem;
@@ -72,6 +76,7 @@
       width: 100%;
       max-width: 480px;
     }
+    .btn:disabled { opacity: 0.55; cursor: default; }
     .btn-link {
       display: block;
       text-align: center;
@@ -79,18 +84,26 @@
       margin-top: 0.75rem;
       background: linear-gradient(135deg, #00d4ff, #0088cc);
     }
-    .hint { font-size: 0.8rem; color: #8892a8; text-align: center; max-width: 420px; line-height: 1.5; }
-    .room { color: #ffd60a; font-size: 1.2rem; }
+    .hint { font-size: 0.78rem; color: #8892a8; text-align: center; max-width: 420px; line-height: 1.5; }
+    .room { color: #ffd60a; font-size: 1.15rem; letter-spacing: 0.12em; }
+    .connected-badge {
+      display: none;
+      font-size: 0.9rem;
+      color: #00d4ff;
+      font-weight: 700;
+    }
+    .connected-badge.show { display: block; }
   </style>
 </head>
 <body>
   <h1>📷 手機鏡頭 → 競賽主機</h1>
-  <p class="status" id="status">準備中…</p>
+  <p class="status wait" id="status">正在連線…</p>
   <div id="secure-warn" class="secure-warn" hidden></div>
-  <p>房間碼：<span class="room" id="room-display">—</span></p>
-  <video id="preview" autoplay playsinline muted></video>
-  <button id="btn-start" class="btn" disabled>開啟鏡頭並連線</button>
-  <p class="hint">① 主機用 <strong>https://IP:8443/</strong> 開啟並選「手機/平板」→ 按「連接鏡頭」 ② 再掃 QR ③ 允許相機權限</p>
+  <p>房間 <span class="room" id="room-display">—</span></p>
+  <p class="connected-badge" id="connected-badge">✓ 已連線 · 可固定手機於戰盤上方</p>
+  <video id="preview" class="hidden-preview" autoplay playsinline muted></video>
+  <button id="btn-retry" class="btn" hidden disabled>重試連線</button>
+  <p class="hint" id="hint">掃 QR 後會自動開啟鏡頭並連線，請允許相機權限</p>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script>
     const PEER_CONFIG = {
@@ -102,8 +115,9 @@
         ],
       },
     };
-    const MAX_CALL_RETRIES = 40;
-    const CALL_RETRY_MS = 1500;
+    const MAX_CALL_RETRIES = 60;
+    const CALL_RETRY_MS = 1200;
+    const AUTO_START_DELAY_MS = 400;
 
     const params = new URLSearchParams(location.search);
     const room = (params.get('room') || '').trim().toUpperCase();
@@ -111,32 +125,41 @@
     const statusEl = document.getElementById('status');
     const secureWarn = document.getElementById('secure-warn');
     const preview = document.getElementById('preview');
-    const btn = document.getElementById('btn-start');
+    const retryBtn = document.getElementById('btn-retry');
+    const connectedBadge = document.getElementById('connected-badge');
     let localStream = null;
     let peer = null;
     let activeCall = null;
     let connected = false;
     let retryTimer = null;
     let dialAttempt = 0;
+    let starting = false;
 
     function isRetriablePeerError(err) {
       const msg = String((err && err.message) || (err && err.type) || err || '');
       return err.type === 'peer-unavailable'
         || err.type === 'network'
         || err.type === 'server-error'
-        || /could not connect to peer/i.test(msg)
-        || /Could not connect to peer/i.test(msg);
+        || /could not connect to peer/i.test(msg);
     }
 
-    document.getElementById('room-display').textContent = room || '（缺少 room 參數）';
+    document.getElementById('room-display').textContent = room || '—';
 
     function setStatus(msg, type) {
       statusEl.textContent = msg;
       statusEl.className = 'status' + (type ? ' ' + type : '');
     }
 
+    function showRetry(msg) {
+      setStatus(msg, 'err');
+      retryBtn.hidden = false;
+      retryBtn.disabled = false;
+      retryBtn.textContent = '重試連線';
+    }
+
     function cleanup() {
       if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = null;
       if (activeCall) {
         activeCall.close();
         activeCall = null;
@@ -150,6 +173,8 @@
         peer = null;
       }
       connected = false;
+      connectedBadge.classList.remove('show');
+      preview.classList.add('hidden-preview');
     }
 
     function getCameraErrorMessage() {
@@ -159,8 +184,7 @@
         secureWarn.hidden = false;
         secureWarn.innerHTML =
           '<strong>需要 HTTPS 才能開鏡頭</strong><br><br>' +
-          'iPhone Safari 不允許在 <code>http://</code> 使用相機。<br><br>' +
-          '請確認主機已執行：<code>python3 serve-https.py</code>';
+          '請確認主機已執行 <code>./start.sh</code>';
         const link = document.createElement('a');
         link.href = httpsUrl;
         link.className = 'btn btn-link';
@@ -173,34 +197,26 @@
         note.style.fontSize = '0.78rem';
         note.innerHTML = '首次需：顯示詳細資料 → 瀏覽此網站（接受憑證）';
         secureWarn.appendChild(note);
-        return '正在跳轉 HTTPS…若未自動跳轉請點藍色按鈕';
+        return '正在跳轉 HTTPS…';
       }
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        return '此瀏覽器不支援相機 API，請用 Safari 或 Chrome';
+        return '此瀏覽器不支援相機，請用 Safari 或 Chrome';
       }
       return null;
     }
 
     const camBlock = getCameraErrorMessage();
-    if (camBlock) {
-      setStatus(camBlock, 'err');
-    } else if (!hostId) {
-      setStatus('連結無效：請從主機掃描 QR 或複製完整連結', 'err');
-    } else {
-      btn.disabled = false;
-      setStatus('點下方按鈕開啟鏡頭並連至主機');
-    }
-
-    async function getUserMedia(constraints) {
-      return navigator.mediaDevices.getUserMedia(constraints);
-    }
 
     function onPhoneConnected() {
       if (connected) return;
       connected = true;
+      starting = false;
       if (retryTimer) clearTimeout(retryTimer);
-      setStatus('已連線！可將手機固定於戰盤上方', 'ok');
-      btn.textContent = '已連線';
+      setStatus('已連線！', 'ok');
+      connectedBadge.classList.add('show');
+      preview.classList.remove('hidden-preview');
+      retryBtn.hidden = true;
+      document.getElementById('hint').textContent = '保持此頁開啟，畫面會傳到主機';
     }
 
     function watchCallState(call, attempt) {
@@ -214,9 +230,8 @@
         if (s === 'connected') onPhoneConnected();
         if ((s === 'failed' || s === 'disconnected') && connected) {
           connected = false;
-          setStatus('與主機連線中斷', 'err');
-          btn.disabled = false;
-          btn.textContent = '重新連線';
+          starting = false;
+          showRetry('與主機連線中斷');
         }
         if (s === 'failed' && !connected) scheduleRetry(attempt);
       });
@@ -231,12 +246,11 @@
       if (connected) return;
       dialAttempt = attempt;
       if (attempt >= MAX_CALL_RETRIES) {
-        setStatus('無法連線主機。請確認：① 主機用 https://IP:8443/ 開啟 ② 已選「手機/平板」③ 房間碼 ' + room + ' 一致', 'err');
-        btn.disabled = false;
-        btn.textContent = '重試連線';
+        starting = false;
+        showRetry('無法連線主機。請確認主機已選「手機/平板」且房間碼為 ' + room);
         return;
       }
-      setStatus(`等待主機就緒… (${attempt + 1}/${MAX_CALL_RETRIES}) — 請確認主機已按「連接鏡頭」`);
+      setStatus(`等待主機就緒… ${attempt + 1}/${MAX_CALL_RETRIES}`, 'wait');
       retryTimer = setTimeout(() => dialHost(attempt + 1), CALL_RETRY_MS);
     }
 
@@ -248,7 +262,8 @@
         activeCall = null;
       }
 
-      setStatus(attempt === 0 ? '正在連線主機…' : `等待主機就緒… (${attempt + 1}/${MAX_CALL_RETRIES})`);
+      if (attempt === 0) setStatus('正在連線主機…', 'wait');
+      else setStatus(`等待主機就緒… ${attempt + 1}/${MAX_CALL_RETRIES}`, 'wait');
 
       activeCall = peer.call(hostId, localStream);
       if (!activeCall) {
@@ -259,33 +274,32 @@
       activeCall.on('error', (err) => {
         if (!connected && isRetriablePeerError(err)) scheduleRetry(attempt);
         else if (!connected) {
-          setStatus('連線錯誤：' + (err.message || err.type || 'unknown'), 'err');
-          btn.disabled = false;
-          btn.textContent = '重試連線';
+          starting = false;
+          showRetry('連線錯誤：' + (err.message || err.type || 'unknown'));
         }
       });
       activeCall.on('close', () => {
         if (connected) {
           connected = false;
-          setStatus('連線已關閉', 'err');
-          btn.disabled = false;
-          btn.textContent = '重新連線';
+          starting = false;
+          showRetry('連線已關閉');
         }
       });
       watchCallState(activeCall, attempt);
     }
 
-    btn.addEventListener('click', async () => {
-      if (!hostId || camBlock) return;
-      if (connected) return;
+    async function startConnection() {
+      if (!hostId || camBlock || connected || starting) return;
 
-      btn.disabled = true;
-      btn.textContent = '連線中…';
+      starting = true;
+      retryBtn.hidden = true;
+      retryBtn.disabled = true;
       cleanup();
+      starting = true;
 
       try {
-        setStatus('正在開啟鏡頭…');
-        localStream = await getUserMedia({
+        setStatus('正在開啟鏡頭…', 'wait');
+        localStream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false,
         });
@@ -302,25 +316,37 @@
             scheduleRetry(dialAttempt);
             return;
           }
-          setStatus('Peer 錯誤：' + (err.message || err.type), 'err');
-          btn.disabled = false;
-          btn.textContent = '重試連線';
+          starting = false;
+          showRetry('Peer 錯誤：' + (err.message || err.type));
         });
 
         peer.on('disconnected', () => {
-          if (!connected) setStatus('Peer 斷線，正在重連…');
+          if (!connected) setStatus('網路斷線，正在重連…', 'wait');
           peer.reconnect();
         });
       } catch (err) {
         console.error(err);
         cleanup();
-        setStatus('無法開啟鏡頭：' + (err.message || '請允許相機權限'), 'err');
-        btn.disabled = false;
-        btn.textContent = '開啟鏡頭並連線';
+        starting = false;
+        if (err.name === 'NotAllowedError') {
+          showRetry('請允許相機權限後重試');
+        } else {
+          showRetry('無法開啟鏡頭：' + (err.message || '請檢查權限'));
+        }
       }
-    });
+    }
+
+    retryBtn.addEventListener('click', () => startConnection());
 
     window.addEventListener('beforeunload', cleanup);
+
+    if (camBlock) {
+      setStatus(camBlock, 'err');
+    } else if (!hostId) {
+      setStatus('連結無效，請從主機掃描 QR', 'err');
+    } else {
+      setTimeout(startConnection, AUTO_START_DELAY_MS);
+    }
   </script>
 </body>
 </html>

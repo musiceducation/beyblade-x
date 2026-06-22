@@ -4,6 +4,21 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>咩咩遊樂園 — Beyblade X 陀螺競賽</title>
+  <script>
+    (function () {
+      if (location.protocol !== 'http:') return;
+      var host = location.hostname;
+      var port = location.port;
+      if (port === '8443') return;
+      if (host === 'localhost' || host === '127.0.0.1') {
+        if (port === '8080' || port === '8000' || port === '') {
+          location.replace('https://' + host + ':8443' + location.pathname + location.search + location.hash);
+        }
+        return;
+      }
+      location.replace('https://' + host + ':8443' + location.pathname + location.search + location.hash);
+    })();
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;600;700&family=Bebas+Neue&family=Bangers&display=swap" rel="stylesheet">
@@ -212,7 +227,7 @@
               <option value="remote">手機 / 平板（QR 連線）</option>
               <option value="url">網路鏡頭 URL</option>
             </select>
-            <button id="btn-cam-start" class="btn btn-sm btn-primary">連接鏡頭</button>
+            <button id="btn-cam-start" class="btn btn-sm btn-primary" data-label-local="連接鏡頭" data-label-remote="等待手機 QR…">連接鏡頭</button>
             <button id="btn-cam-stop" class="btn btn-sm btn-ghost" disabled>停止</button>
             <label class="toggle">
               <input type="checkbox" id="cam-mirror" checked> 鏡像
@@ -229,18 +244,22 @@
         <div id="cam-remote-panel" class="cam-sub-panel" hidden>
           <div id="host-secure-warn" class="host-secure-warn" hidden></div>
           <div class="remote-cam-layout">
-            <img id="remote-qr" class="remote-qr" alt="掃描 QR 連接手機鏡頭" width="140" height="140">
+            <img id="remote-qr" class="remote-qr" alt="掃描 QR 連接手機鏡頭" width="180" height="180">
             <div class="remote-cam-info">
+              <p class="remote-quick-title">手機掃 QR → 允許相機 → 完成</p>
               <p>房間碼：<strong id="remote-room-code">------</strong></p>
-              <p class="cam-hint" id="remote-link-text"></p>
-              <button id="btn-copy-remote-link" class="btn btn-sm btn-ghost" type="button">複製手機連結</button>
-            <button id="btn-new-room" class="btn btn-sm btn-ghost" type="button">新房間碼</button>
-              <p class="remote-status" id="remote-status">① 選「手機/平板」後主機會自動就緒 ② 手機掃 QR ③ 按「開啟鏡頭並連線」</p>
+              <p class="remote-status" id="remote-status">主機就緒中…</p>
+              <div class="remote-actions">
+                <button id="btn-copy-remote-link" class="btn btn-sm btn-ghost" type="button">複製連結</button>
+                <button id="btn-new-room" class="btn btn-sm btn-ghost" type="button">新房間碼</button>
+              </div>
+              <p class="cam-hint cam-hint-compact" id="remote-link-text"></p>
             </div>
           </div>
-          <p class="cam-hint">手機須用 <strong>HTTPS :8443</strong> 連線（Safari 不允許 HTTP 開鏡頭）。請先執行 <code>python3 serve-https.py</code></p>
-          <p class="cam-hint"><strong>主機也須用 HTTPS :8443</strong> 開啟此頁，才能顯示手機畫面（例如 <code>https://192.168.x.x:8443/</code>）</p>
-          <p class="cam-hint">首次請在電腦及手機瀏覽器接受憑證警告，再掃 QR</p>
+          <details class="remote-help">
+            <summary>連線說明</summary>
+            <p class="cam-hint">請執行 <code>./start.sh</code> 或 <code>python3 serve-https.py</code>，用 <strong>https://電腦IP:8443/</strong> 開啟本頁。首次須在電腦與手機瀏覽器接受憑證警告。</p>
+          </details>
         </div>
         <div id="cam-url-panel" class="cam-sub-panel" hidden>
           <div class="cam-url-row">
