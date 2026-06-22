@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>咩咩遊樂園 — Beyblade X 陀螺競賽</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;600;700&family=Bebas+Neue&family=Bangers&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="fx-layer" aria-hidden="true">
+    <canvas id="particle-canvas"></canvas>
+    <div id="flash-overlay"></div>
+    <div id="burst-ring"></div>
+    <div id="burst-ring-2"></div>
+  </div>
+
+  <div id="launch-camera-overlay" class="launch-camera-overlay" hidden aria-hidden="true">
+    <div class="launch-camera-vignette"></div>
+    <div class="launch-anime-bg" aria-hidden="true">
+      <div class="launch-halftone"></div>
+      <div class="launch-impact-burst"></div>
+    </div>
+    <div id="launch-camera-text" class="launch-camera-text"></div>
+    <p class="launch-camera-hint">按 Esc 退出全螢幕</p>
+  </div>
+
+  <button id="btn-relaunch" class="btn-relaunch" type="button" hidden>
+    Three, Two, One, Go Shoot!
+  </button>
+
+  <header class="arena-header">
+    <div class="logo-block">
+      <span class="logo-x">X</span>
+      <div>
+        <h1>咩咩遊樂園 · 陀螺競賽</h1>
+        <p class="event-subtitle">2026.7.4 · 迷失的小羊 · Beyblade X</p>
+      </div>
+    </div>
+    <div class="header-controls">
+      <select id="session-select" class="session-select" aria-label="比賽場次">
+        <option value="junior">第一場 低齡組（6–12歲）15:00</option>
+        <option value="senior">第二場 高齡組（12歲+）16:30</option>
+      </select>
+      <select id="phase-select" class="session-select" aria-label="比賽階段">
+        <option value="prelim">初賽</option>
+        <option value="quarter">複賽</option>
+        <option value="revival">迷失小羊復活賽</option>
+        <option value="challenge">四強資格爭奪戰</option>
+        <option value="semi">準決賽</option>
+        <option value="final">總決賽</option>
+      </select>
+      <button id="btn-fullscreen" class="btn btn-ghost" title="全螢幕">⛶</button>
+      <button id="btn-reset-match" class="btn btn-ghost">重置對戰</button>
+    </div>
+  </header>
+
+  <nav class="app-nav" aria-label="主界面">
+    <button type="button" class="app-nav-btn active" data-view="battle">⚔ 對戰計分</button>
+    <button type="button" class="app-nav-btn" data-view="tournament">📋 選手 · 賽程</button>
+    <button type="button" class="app-nav-btn" data-view="camera">📷 鏡頭</button>
+    <button type="button" class="app-nav-btn" data-view="log">📝 戰報</button>
+  </nav>
+
+  <main class="arena-layout">
+    <div id="view-battle" class="app-view active">
+    <!-- Scoreboard -->
+    <section class="scoreboard" aria-label="Scoreboard">
+      <article class="player-card player-red" data-player="1">
+        <div class="player-header">
+          <input type="text" id="name-p1" class="player-name" value="Blader 1" maxlength="16" aria-label="Player 1 name">
+          <span class="player-badge">RED</span>
+        </div>
+        <div class="score-display">
+          <span id="score-p1" class="score-num">0</span>
+          <span class="score-label">/ 4 分</span>
+        </div>
+        <div class="score-track" id="track-p1" aria-label="Player 1 score progress"></div>
+        <p class="finish-hint">按對手陀螺的終結方式計分</p>
+        <div class="finish-buttons">
+          <button class="btn-finish spin" data-player="1" data-type="spin" title="修煉終結 Spin Finish — 對手陀螺停止旋轉 (+1)">
+            <span class="finish-icon">🌀</span>
+            <span class="finish-name">修煉終結<em>Spin</em></span>
+            <strong>+1</strong>
+          </button>
+          <button class="btn-finish burst" data-player="1" data-type="burst" title="擊爆終結 Burst Finish — 對手陀螺解體 (+2)">
+            <span class="finish-icon">💥</span>
+            <span class="finish-name">擊爆終結<em>Burst</em></span>
+            <strong>+2</strong>
+          </button>
+          <button class="btn-finish over" data-player="1" data-type="over" title="擊飛終結 Over Finish — 對手陀螺擊出擂台 (+2)">
+            <span class="finish-icon">⬆</span>
+            <span class="finish-name">擊飛終結<em>Over</em></span>
+            <strong>+2</strong>
+          </button>
+          <button class="btn-finish extreme" data-player="1" data-type="extreme" title="極限終結 Xtreme Finish — 極限加速軌道擊出 (+3)">
+            <span class="finish-icon">⚡</span>
+            <span class="finish-name">極限終結<em>Xtreme</em></span>
+            <strong>+3</strong>
+          </button>
+        </div>
+      </article>
+
+      <div class="vs-center">
+        <div class="match-info">
+          <span class="match-label">第幾局對戰</span>
+          <span id="battle-num" class="round-num">1</span>
+        </div>
+        <div class="vs-badge">VS</div>
+        <p class="rules-note">官方 4 分制 · 整場 Match 累積計分<br>先取 4 分者勝</p>
+        <div class="timer-block">
+          <span id="launch-timer" class="launch-timer">Ready</span>
+          <p class="launch-hint">國際對決口令</p>
+          <button id="btn-launch" class="btn btn-launch">Three, Two, One, Go Shoot!</button>
+          <label class="toggle voice-toggle">
+            <input type="checkbox" id="voice-countdown" checked> Shu 倒數音效
+          </label>
+        </div>
+        <audio id="go-shoot-audio" preload="auto" src="beyblade-burst-sparking--shu-321-go-shoot.mp3"></audio>
+        <button id="btn-next-battle" class="btn btn-primary">下一局對戰</button>
+      </div>
+
+      <article class="player-card player-blue" data-player="2">
+        <div class="player-header">
+          <input type="text" id="name-p2" class="player-name" value="Blader 2" maxlength="16" aria-label="Player 2 name">
+          <span class="player-badge">BLUE</span>
+        </div>
+        <div class="score-display">
+          <span id="score-p2" class="score-num">0</span>
+          <span class="score-label">/ 4 分</span>
+        </div>
+        <div class="score-track" id="track-p2" aria-label="Player 2 score progress"></div>
+        <p class="finish-hint">按對手陀螺的終結方式計分</p>
+        <div class="finish-buttons">
+          <button class="btn-finish spin" data-player="2" data-type="spin">
+            <span class="finish-icon">🌀</span>
+            <span class="finish-name">修煉終結<em>Spin</em></span>
+            <strong>+1</strong>
+          </button>
+          <button class="btn-finish burst" data-player="2" data-type="burst">
+            <span class="finish-icon">💥</span>
+            <span class="finish-name">擊爆終結<em>Burst</em></span>
+            <strong>+2</strong>
+          </button>
+          <button class="btn-finish over" data-player="2" data-type="over">
+            <span class="finish-icon">⬆</span>
+            <span class="finish-name">擊飛終結<em>Over</em></span>
+            <strong>+2</strong>
+          </button>
+          <button class="btn-finish extreme" data-player="2" data-type="extreme">
+            <span class="finish-icon">⚡</span>
+            <span class="finish-name">極限終結<em>Xtreme</em></span>
+            <strong>+3</strong>
+          </button>
+        </div>
+      </article>
+    </section>
+    </div>
+
+    <div id="view-tournament" class="app-view">
+    <section id="tournament-panel" class="tournament-panel">
+      <div class="tournament-header">
+        <h2>選手名單 · 抽籤 · 賽程表</h2>
+        <div class="tournament-header-actions">
+          <span id="draw-status" class="draw-badge">未抽籤</span>
+          <button id="btn-draw" class="btn btn-sm btn-primary" type="button">🎲 抽籤配對</button>
+          <button id="btn-reset-bracket" class="btn btn-sm btn-ghost" type="button">重設賽程</button>
+        </div>
+      </div>
+      <div class="tournament-body">
+        <div class="roster-panel">
+          <div class="roster-toolbar">
+            <span id="roster-count" class="roster-count">0 / 16</span>
+            <div class="roster-add-row">
+              <input id="new-player-name" type="text" placeholder="選手姓名" maxlength="16">
+              <button id="btn-add-player" class="btn btn-sm btn-primary" type="button">加入</button>
+            </div>
+          </div>
+          <ul id="roster-list" class="roster-list"></ul>
+          <details class="bulk-import">
+            <summary>批量貼上名單（每行一位）</summary>
+            <textarea id="bulk-players" rows="5" placeholder="小明&#10;小華&#10;…"></textarea>
+            <button id="btn-import-players" class="btn btn-sm btn-ghost" type="button">匯入</button>
+          </details>
+        </div>
+        <div class="bracket-panel">
+          <h3 class="bracket-title">賽程表 <span class="bracket-session-hint">← 左右滑動 · 分輪次查看</span></h3>
+          <div id="bracket-view" class="bracket-view"></div>
+        </div>
+      </div>
+    </section>
+    </div>
+
+    <div id="view-camera" class="app-view">
+      <div class="camera-panel camera-panel-full">
+        <div class="panel-header">
+          <h2>Live Stadium Cam</h2>
+          <div class="camera-controls">
+            <select id="cam-source" class="cam-select cam-source-select" aria-label="鏡頭來源">
+              <option value="local">本機鏡頭 / USB / 采集卡</option>
+              <option value="remote">手機 / 平板（QR 連線）</option>
+              <option value="url">網路鏡頭 URL</option>
+            </select>
+            <button id="btn-cam-start" class="btn btn-sm btn-primary">連接鏡頭</button>
+            <button id="btn-cam-stop" class="btn btn-sm btn-ghost" disabled>停止</button>
+            <label class="toggle">
+              <input type="checkbox" id="cam-mirror" checked> 鏡像
+            </label>
+          </div>
+        </div>
+        <div id="cam-local-panel" class="cam-sub-panel">
+          <select id="cam-device" class="cam-select" disabled>
+            <option value="">預設鏡頭</option>
+          </select>
+          <button id="btn-cam-refresh" class="btn btn-sm btn-ghost" type="button">重新掃描裝置</button>
+          <p class="cam-hint">支援 Mac Continuity Camera、USB 鏡頭、采集卡等</p>
+        </div>
+        <div id="cam-remote-panel" class="cam-sub-panel" hidden>
+          <div id="host-secure-warn" class="host-secure-warn" hidden></div>
+          <div class="remote-cam-layout">
+            <img id="remote-qr" class="remote-qr" alt="掃描 QR 連接手機鏡頭" width="140" height="140">
+            <div class="remote-cam-info">
+              <p>房間碼：<strong id="remote-room-code">------</strong></p>
+              <p class="cam-hint" id="remote-link-text"></p>
+              <button id="btn-copy-remote-link" class="btn btn-sm btn-ghost" type="button">複製手機連結</button>
+            <button id="btn-new-room" class="btn btn-sm btn-ghost" type="button">新房間碼</button>
+              <p class="remote-status" id="remote-status">① 選「手機/平板」後主機會自動就緒 ② 手機掃 QR ③ 按「開啟鏡頭並連線」</p>
+            </div>
+          </div>
+          <p class="cam-hint">手機須用 <strong>HTTPS :8443</strong> 連線（Safari 不允許 HTTP 開鏡頭）。請先執行 <code>python3 serve-https.py</code></p>
+          <p class="cam-hint"><strong>主機也須用 HTTPS :8443</strong> 開啟此頁，才能顯示手機畫面（例如 <code>https://192.168.x.x:8443/</code>）</p>
+          <p class="cam-hint">首次請在電腦及手機瀏覽器接受憑證警告，再掃 QR</p>
+        </div>
+        <div id="cam-url-panel" class="cam-sub-panel" hidden>
+          <div class="cam-url-row">
+            <input id="cam-url-input" class="cam-url-input" type="url" placeholder="http://192.168.1.5:4747/video">
+            <button id="btn-cam-url-apply" class="btn btn-sm btn-primary" type="button">套用</button>
+          </div>
+          <p class="cam-hint">適用 DroidCam、EpocCam、IP Webcam 等 App 的 MJPEG / 影像網址</p>
+        </div>
+        <div class="camera-viewport" id="camera-viewport">
+          <video id="camera-feed" autoplay playsinline muted></video>
+          <img id="camera-feed-img" alt="" hidden>
+          <div class="camera-placeholder" id="camera-placeholder">
+            <span class="placeholder-icon">📷</span>
+            <p>連接本機鏡頭、手機 QR、或其他裝置的網路影像</p>
+          </div>
+          <div class="scanlines" aria-hidden="true"></div>
+          <div class="rec-badge" id="rec-badge" hidden>
+            <span class="rec-dot"></span> LIVE
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="view-log" class="app-view">
+      <div class="battle-log-panel battle-log-panel-full">
+        <div class="panel-header">
+          <h2>戰報</h2>
+          <button id="btn-clear-log" class="btn btn-sm btn-ghost">清除</button>
+        </div>
+        <ul id="battle-log" class="battle-log" aria-live="polite"></ul>
+      </div>
+    </div>
+  </main>
+
+  <!-- Victory overlay -->
+  <div id="victory-overlay" class="victory-overlay" hidden>
+    <div class="victory-content">
+      <p class="victory-label">勝 者</p>
+      <h2 id="victory-name">Blader 1</h2>
+      <p id="victory-detail" class="victory-detail">對戰完成</p>
+      <button id="btn-dismiss-victory" class="btn btn-primary">繼續</button>
+    </div>
+  </div>
+
+  <!-- Finish announcement toast -->
+  <div id="finish-toast" class="finish-toast" hidden aria-live="assertive">
+    <span id="toast-text"></span>
+  </div>
+
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="tournament.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

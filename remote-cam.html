@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>咩咩遊樂園 — 手機鏡頭</title>
+  <script>
+    (function () {
+      if (location.protocol === 'http:') {
+        location.replace(
+          'https://' + location.hostname + ':8443' + location.pathname + location.search
+        );
+      }
+    })();
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Rajdhani', sans-serif;
+      background: #0a0e17;
+      color: #e8edf5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 1rem;
+      gap: 1rem;
+    }
+    h1 { font-size: 1.1rem; letter-spacing: 0.05em; text-align: center; }
+    .status {
+      text-align: center;
+      font-size: 0.95rem;
+      color: #8892a8;
+      min-height: 1.5em;
+      max-width: 420px;
+      line-height: 1.45;
+    }
+    .status.ok { color: #00d4ff; }
+    .status.err { color: #ff2d55; }
+    .secure-warn {
+      background: rgba(255, 45, 85, 0.12);
+      border: 1px solid var(--red, #ff2d55);
+      border-radius: 10px;
+      padding: 0.85rem;
+      font-size: 0.85rem;
+      max-width: 420px;
+      line-height: 1.5;
+      color: #ffb3c0;
+    }
+    .secure-warn strong { color: #ff2d55; }
+    .secure-warn code { background: rgba(0,0,0,0.3); padding: 0.1rem 0.35rem; border-radius: 4px; }
+    video {
+      width: 100%;
+      max-width: 480px;
+      border-radius: 12px;
+      background: #000;
+      aspect-ratio: 4/3;
+      object-fit: cover;
+    }
+    video.mirrored { transform: scaleX(-1); }
+    .btn {
+      font-family: inherit;
+      font-size: 1rem;
+      font-weight: 700;
+      padding: 0.85rem 1.5rem;
+      border: none;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #ff2d55, #cc0033);
+      color: #fff;
+      cursor: pointer;
+      width: 100%;
+      max-width: 480px;
+    }
+    .btn-link {
+      display: block;
+      text-align: center;
+      text-decoration: none;
+      margin-top: 0.75rem;
+      background: linear-gradient(135deg, #00d4ff, #0088cc);
+    }
+    .hint { font-size: 0.8rem; color: #8892a8; text-align: center; max-width: 420px; line-height: 1.5; }
+    .room { color: #ffd60a; font-size: 1.2rem; }
+  </style>
+</head>
+<body>
+  <h1>📷 手機鏡頭 → 競賽主機</h1>
+  <p class="status" id="status">準備中…</p>
+  <div id="secure-warn" class="secure-warn" hidden></div>
+  <p>房間碼：<span class="room" id="room-display">—</span></p>
+  <video id="preview" autoplay playsinline muted></video>
+  <button id="btn-start" class="btn" disabled>開啟鏡頭並連線</button>
+  <p class="hint">① 主機用 <strong>https://IP:8443/</strong> 開啟並選「手機/平板」→ 按「連接鏡頭」 ② 再掃 QR ③ 允許相機權限</p>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script>
+    const PEER_CONFIG = {
+      debug: 0,
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+        ],
+      },
+    };
+    const MAX_CALL_RETRIES = 40;
+    const CALL_RETRY_MS = 1500;
+
+    const params = new URLSearchParams(location.search);
+    const room = (params.get('room') || '').trim().toUpperCase();
+    const hostId = room ? `bex-${room}` : null;
+    const statusEl = document.getElementById('status');
+    const secureWarn = document.getElementById('secure-warn');
+    const preview = document.getElementById('preview');
+    const btn = document.getElementById('btn-start');
+    let localStream = null;
+    let peer = null;
+    let activeCall = null;
+    let connected = false;
+    let retryTimer = null;
+    let dialAttempt = 0;
+
+    function isRetriablePeerError(err) {
+      const msg = String((err && err.message) || (err && err.type) || err || '');
+      return err.type === 'peer-unavailable'
+        || err.type === 'network'
+        || err.type === 'server-error'
+        || /could not connect to peer/i.test(msg)
+        || /Could not connect to peer/i.test(msg);
+    }
+
+    document.getElementById('room-display').textContent = room || '（缺少 room 參數）';
+
+    function setStatus(msg, type) {
+      statusEl.textContent = msg;
+      statusEl.className = 'status' + (type ? ' ' + type : '');
+    }
+
+    function cleanup() {
+      if (retryTimer) clearTimeout(retryTimer);
+      if (activeCall) {
+        activeCall.close();
+        activeCall = null;
+      }
+      if (localStream) {
+        localStream.getTracks().forEach((t) => t.stop());
+        localStream = null;
+      }
+      if (peer) {
+        peer.destroy();
+        peer = null;
+      }
+      connected = false;
+    }
+
+    function getCameraErrorMessage() {
+      if (!window.isSecureContext) {
+        const host = location.hostname;
+        const httpsUrl = `https://${host}:8443${location.pathname}${location.search}`;
+        secureWarn.hidden = false;
+        secureWarn.innerHTML =
+          '<strong>需要 HTTPS 才能開鏡頭</strong><br><br>' +
+          'iPhone Safari 不允許在 <code>http://</code> 使用相機。<br><br>' +
+          '請確認主機已執行：<code>python3 serve-https.py</code>';
+        const link = document.createElement('a');
+        link.href = httpsUrl;
+        link.className = 'btn btn-link';
+        link.textContent = '👉 點此改用 HTTPS 開啟';
+        link.style.maxWidth = '420px';
+        secureWarn.appendChild(document.createElement('br'));
+        secureWarn.appendChild(link);
+        const note = document.createElement('p');
+        note.style.marginTop = '0.75rem';
+        note.style.fontSize = '0.78rem';
+        note.innerHTML = '首次需：顯示詳細資料 → 瀏覽此網站（接受憑證）';
+        secureWarn.appendChild(note);
+        return '正在跳轉 HTTPS…若未自動跳轉請點藍色按鈕';
+      }
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        return '此瀏覽器不支援相機 API，請用 Safari 或 Chrome';
+      }
+      return null;
+    }
+
+    const camBlock = getCameraErrorMessage();
+    if (camBlock) {
+      setStatus(camBlock, 'err');
+    } else if (!hostId) {
+      setStatus('連結無效：請從主機掃描 QR 或複製完整連結', 'err');
+    } else {
+      btn.disabled = false;
+      setStatus('點下方按鈕開啟鏡頭並連至主機');
+    }
+
+    async function getUserMedia(constraints) {
+      return navigator.mediaDevices.getUserMedia(constraints);
+    }
+
+    function onPhoneConnected() {
+      if (connected) return;
+      connected = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      setStatus('已連線！可將手機固定於戰盤上方', 'ok');
+      btn.textContent = '已連線';
+    }
+
+    function watchCallState(call, attempt) {
+      const pc = call.peerConnection;
+      if (!pc) {
+        setTimeout(() => { if (!connected) onPhoneConnected(); }, 1200);
+        return;
+      }
+      pc.addEventListener('connectionstatechange', () => {
+        const s = pc.connectionState;
+        if (s === 'connected') onPhoneConnected();
+        if ((s === 'failed' || s === 'disconnected') && connected) {
+          connected = false;
+          setStatus('與主機連線中斷', 'err');
+          btn.disabled = false;
+          btn.textContent = '重新連線';
+        }
+        if (s === 'failed' && !connected) scheduleRetry(attempt);
+      });
+      pc.addEventListener('iceconnectionstatechange', () => {
+        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+          onPhoneConnected();
+        }
+      });
+    }
+
+    function scheduleRetry(attempt) {
+      if (connected) return;
+      dialAttempt = attempt;
+      if (attempt >= MAX_CALL_RETRIES) {
+        setStatus('無法連線主機。請確認：① 主機用 https://IP:8443/ 開啟 ② 已選「手機/平板」③ 房間碼 ' + room + ' 一致', 'err');
+        btn.disabled = false;
+        btn.textContent = '重試連線';
+        return;
+      }
+      setStatus(`等待主機就緒… (${attempt + 1}/${MAX_CALL_RETRIES}) — 請確認主機已按「連接鏡頭」`);
+      retryTimer = setTimeout(() => dialHost(attempt + 1), CALL_RETRY_MS);
+    }
+
+    function dialHost(attempt) {
+      if (!peer || !localStream || connected) return;
+      dialAttempt = attempt;
+      if (activeCall) {
+        activeCall.close();
+        activeCall = null;
+      }
+
+      setStatus(attempt === 0 ? '正在連線主機…' : `等待主機就緒… (${attempt + 1}/${MAX_CALL_RETRIES})`);
+
+      activeCall = peer.call(hostId, localStream);
+      if (!activeCall) {
+        scheduleRetry(attempt);
+        return;
+      }
+
+      activeCall.on('error', (err) => {
+        if (!connected && isRetriablePeerError(err)) scheduleRetry(attempt);
+        else if (!connected) {
+          setStatus('連線錯誤：' + (err.message || err.type || 'unknown'), 'err');
+          btn.disabled = false;
+          btn.textContent = '重試連線';
+        }
+      });
+      activeCall.on('close', () => {
+        if (connected) {
+          connected = false;
+          setStatus('連線已關閉', 'err');
+          btn.disabled = false;
+          btn.textContent = '重新連線';
+        }
+      });
+      watchCallState(activeCall, attempt);
+    }
+
+    btn.addEventListener('click', async () => {
+      if (!hostId || camBlock) return;
+      if (connected) return;
+
+      btn.disabled = true;
+      btn.textContent = '連線中…';
+      cleanup();
+
+      try {
+        setStatus('正在開啟鏡頭…');
+        localStream = await getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        });
+        preview.srcObject = localStream;
+        preview.classList.add('mirrored');
+
+        peer = new Peer(undefined, PEER_CONFIG);
+
+        peer.on('open', () => dialHost(0));
+
+        peer.on('error', (err) => {
+          console.error(err);
+          if (!connected && isRetriablePeerError(err)) {
+            scheduleRetry(dialAttempt);
+            return;
+          }
+          setStatus('Peer 錯誤：' + (err.message || err.type), 'err');
+          btn.disabled = false;
+          btn.textContent = '重試連線';
+        });
+
+        peer.on('disconnected', () => {
+          if (!connected) setStatus('Peer 斷線，正在重連…');
+          peer.reconnect();
+        });
+      } catch (err) {
+        console.error(err);
+        cleanup();
+        setStatus('無法開啟鏡頭：' + (err.message || '請允許相機權限'), 'err');
+        btn.disabled = false;
+        btn.textContent = '開啟鏡頭並連線';
+      }
+    });
+
+    window.addEventListener('beforeunload', cleanup);
+  </script>
+</body>
+</html>
