@@ -78,27 +78,27 @@
           <span class="score-label">/ 4 分</span>
         </div>
         <div class="score-track" id="track-p1" aria-label="Player 1 score progress"></div>
-        <p class="finish-hint">按對手陀螺的終結方式計分</p>
+        <p class="finish-hint">按對手陀螺的結局方式計分</p>
         <div class="finish-buttons">
-          <button class="btn-finish spin" data-player="1" data-type="spin" title="修煉終結 Spin Finish — 對手陀螺停止旋轉 (+1)">
-            <span class="finish-icon">🌀</span>
-            <span class="finish-name">修煉終結<em>Spin</em></span>
-            <strong>+1</strong>
-          </button>
-          <button class="btn-finish burst" data-player="1" data-type="burst" title="擊爆終結 Burst Finish — 對手陀螺解體 (+2)">
-            <span class="finish-icon">💥</span>
-            <span class="finish-name">擊爆終結<em>Burst</em></span>
-            <strong>+2</strong>
-          </button>
-          <button class="btn-finish over" data-player="1" data-type="over" title="擊飛終結 Over Finish — 對手陀螺擊出擂台 (+2)">
-            <span class="finish-icon">⬆</span>
-            <span class="finish-name">擊飛終結<em>Over</em></span>
-            <strong>+2</strong>
-          </button>
-          <button class="btn-finish extreme" data-player="1" data-type="extreme" title="極限終結 Xtreme Finish — 極限加速軌道擊出 (+3)">
+          <button class="btn-finish extreme" data-player="1" data-type="extreme">
             <span class="finish-icon">⚡</span>
-            <span class="finish-name">極限終結<em>Xtreme</em></span>
+            <span class="finish-name">極致收尾<em>Xtreme</em></span>
             <strong>+3</strong>
+          </button>
+          <button class="btn-finish over" data-player="1" data-type="over">
+            <span class="finish-icon">⬆</span>
+            <span class="finish-name">擊飛結局<em>Over</em></span>
+            <strong>+2</strong>
+          </button>
+          <button class="btn-finish burst" data-player="1" data-type="burst">
+            <span class="finish-icon">💥</span>
+            <span class="finish-name">爆裂結局<em>Burst</em></span>
+            <strong>+2</strong>
+          </button>
+          <button class="btn-finish spin" data-player="1" data-type="spin">
+            <span class="finish-icon">🌀</span>
+            <span class="finish-name">殘存結局<em>Spin</em></span>
+            <strong>+1</strong>
           </button>
         </div>
       </article>
@@ -110,6 +110,15 @@
         </div>
         <div class="vs-badge">VS</div>
         <p class="rules-note">官方 4 分制 · 整場 Match 累積計分<br>先取 4 分者勝</p>
+        <details class="finish-rules">
+          <summary>得分判定</summary>
+          <ul>
+            <li><strong>極致收尾 Xtreme Finish</strong> +3 — 擊入極限區域洞口</li>
+            <li><strong>擊飛結局 Over Finish</strong> +2 — 打出場外（擊飛區域）</li>
+            <li><strong>爆裂結局 Burst Finish</strong> +2 — 對手陀螺解體</li>
+            <li><strong>殘存結局 Spin Finish</strong> +1 — 對手先停轉，己方續轉勝</li>
+          </ul>
+        </details>
         <div class="timer-block">
           <span id="launch-timer" class="launch-timer">Ready</span>
           <p class="launch-hint">國際對決口令</p>
@@ -132,27 +141,27 @@
           <span class="score-label">/ 4 分</span>
         </div>
         <div class="score-track" id="track-p2" aria-label="Player 2 score progress"></div>
-        <p class="finish-hint">按對手陀螺的終結方式計分</p>
+        <p class="finish-hint">按對手陀螺的結局方式計分</p>
         <div class="finish-buttons">
-          <button class="btn-finish spin" data-player="2" data-type="spin">
-            <span class="finish-icon">🌀</span>
-            <span class="finish-name">修煉終結<em>Spin</em></span>
-            <strong>+1</strong>
-          </button>
-          <button class="btn-finish burst" data-player="2" data-type="burst">
-            <span class="finish-icon">💥</span>
-            <span class="finish-name">擊爆終結<em>Burst</em></span>
-            <strong>+2</strong>
+          <button class="btn-finish extreme" data-player="2" data-type="extreme">
+            <span class="finish-icon">⚡</span>
+            <span class="finish-name">極致收尾<em>Xtreme</em></span>
+            <strong>+3</strong>
           </button>
           <button class="btn-finish over" data-player="2" data-type="over">
             <span class="finish-icon">⬆</span>
-            <span class="finish-name">擊飛終結<em>Over</em></span>
+            <span class="finish-name">擊飛結局<em>Over</em></span>
             <strong>+2</strong>
           </button>
-          <button class="btn-finish extreme" data-player="2" data-type="extreme">
-            <span class="finish-icon">⚡</span>
-            <span class="finish-name">極限終結<em>Xtreme</em></span>
-            <strong>+3</strong>
+          <button class="btn-finish burst" data-player="2" data-type="burst">
+            <span class="finish-icon">💥</span>
+            <span class="finish-name">爆裂結局<em>Burst</em></span>
+            <strong>+2</strong>
+          </button>
+          <button class="btn-finish spin" data-player="2" data-type="spin">
+            <span class="finish-icon">🌀</span>
+            <span class="finish-name">殘存結局<em>Spin</em></span>
+            <strong>+1</strong>
           </button>
         </div>
       </article>

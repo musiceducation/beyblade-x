@@ -29,10 +29,17 @@ const FINISH_POINTS = {
 };
 
 const FINISH_LABELS = {
-  spin: { zh: '修煉終結', en: 'Spin Finish' },
-  burst: { zh: '擊爆終結', en: 'Burst Finish' },
-  over: { zh: '擊飛終結', en: 'Over Finish' },
-  extreme: { zh: '極限終結', en: 'Xtreme Finish' },
+  extreme: { zh: '極致收尾', en: 'Xtreme Finish' },
+  over: { zh: '擊飛結局', en: 'Over Finish' },
+  burst: { zh: '爆裂結局', en: 'Burst Finish' },
+  spin: { zh: '殘存結局', en: 'Spin Finish' },
+};
+
+const FINISH_DESCRIPTIONS = {
+  extreme: '將對手陀螺擊入戰鬥盤外圍的「極限區域」洞口',
+  over: '利用撞擊力道，將對手陀螺直接打出場外（掉入擊飛區域）',
+  burst: '在戰鬥中將對手陀螺零件撞至分離、解體',
+  spin: '對手陀螺先停止旋轉，而自己的陀螺依然持續旋轉（續轉勝）',
 };
 
 const state = {
@@ -59,6 +66,27 @@ const nameEls = [$('#name-p1'), $('#name-p2')];
 const playerCards = [$('.player-red'), $('.player-blue')];
 
 // ─── Scoring (Official 4-point cumulative Match) ───────────
+
+function finishTooltip(type) {
+  const f = FINISH_LABELS[type];
+  const pts = FINISH_POINTS[type];
+  return `${f.zh} ${f.en} — ${FINISH_DESCRIPTIONS[type]} (+${pts})`;
+}
+
+function syncFinishButtons() {
+  $$('.btn-finish').forEach((btn) => {
+    const type = btn.dataset.type;
+    const f = FINISH_LABELS[type];
+    if (!f) return;
+    btn.title = finishTooltip(type);
+    const nameEl = btn.querySelector('.finish-name');
+    if (nameEl) {
+      nameEl.innerHTML = `${f.zh}<em>${f.en.replace(' Finish', '')}</em>`;
+    }
+    const ptsEl = btn.querySelector('strong');
+    if (ptsEl) ptsEl.textContent = `+${FINISH_POINTS[type]}`;
+  });
+}
 
 function finishLabel(type) {
   const f = FINISH_LABELS[type];
@@ -1461,11 +1489,13 @@ function init() {
     addLog(`比賽階段：${getPhaseLabel()}`);
   });
 
+  syncFinishButtons();
   initTournament();
   initAppViews();
 
   addLog(`歡迎來到咩咩遊樂園陀螺競賽 — ${getSessionLabel()} · ${getPhaseLabel()}`);
   addLog('官方規則：整場 Match 累積計分，先取 4 分者勝');
+  addLog('得分判定：極致收尾 +3 · 擊飛／爆裂結局 +2 · 殘存結局 +1');
   addLog('國際對決口令：Three, Two, One, Go Shoot!');
   updateCamSourcePanels();
   updateHostSecureWarning();

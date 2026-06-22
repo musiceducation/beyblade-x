@@ -410,6 +410,35 @@ body.shake-go-shoot { animation: screenShakeGoShoot 1s cubic-bezier(0.22, 1, 0.3
   width: 100%;
 }
 
+.finish-rules {
+  width: 100%;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.35rem 0.5rem;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.finish-rules summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text);
+  list-style: none;
+}
+
+.finish-rules summary::-webkit-details-marker { display: none; }
+
+.finish-rules ul {
+  margin: 0.45rem 0 0;
+  padding-left: 1rem;
+  line-height: 1.55;
+}
+
+.finish-rules li + li { margin-top: 0.2rem; }
+
+.finish-rules strong { color: var(--text); font-weight: 600; }
+
 .finish-buttons {
   display: grid;
   grid-template-columns: 1fr 1fr;
