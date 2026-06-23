@@ -66,11 +66,11 @@
       </select>
       <select id="phase-select" class="session-select" aria-label="比賽階段">
         <option value="prelim">初賽</option>
+        <option value="revival">復活賽</option>
         <option value="quarter">複賽</option>
-        <option value="revival">迷失小羊復活賽</option>
-        <option value="challenge">四強資格爭奪戰</option>
+        <option value="challenge">四強挑戰</option>
         <option value="semi">準決賽</option>
-        <option value="final">總決賽</option>
+        <option value="final">決賽</option>
       </select>
       <button id="btn-fullscreen" class="btn btn-ghost" title="全螢幕">⛶</button>
       <button id="btn-reset-match" class="btn btn-ghost">重置對戰</button>
@@ -199,6 +199,7 @@
           <button id="btn-reset-bracket" class="btn btn-sm btn-ghost" type="button">重設賽程</button>
         </div>
       </div>
+      <p class="tournament-rundown">比賽流程：初賽 → 復活賽（僅初賽落敗）→ 複賽（落敗直接淘汰）→ 四強挑戰 → 準決賽 → 決賽 · 無季軍戰</p>
       <div class="tournament-body">
         <div class="roster-panel">
           <div class="roster-toolbar">

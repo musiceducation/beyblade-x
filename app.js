@@ -7,11 +7,11 @@ const LAUNCH_SEQUENCE = ['Three', 'Two', 'One', 'Go Shoot!'];
 
 const PHASE_LABELS = {
   prelim: '初賽',
+  revival: '復活賽',
   quarter: '複賽',
-  revival: '迷失小羊復活賽',
-  challenge: '四強資格爭奪戰',
+  challenge: '四強挑戰',
   semi: '準決賽',
-  final: '總決賽',
+  final: '決賽',
 };
 
 const SESSION_LABELS = {
@@ -236,13 +236,14 @@ function endMatch(winnerIdx) {
   }
 }
 
-function resetMatchScoresOnly() {
+function resetMatchScoresOnly(options = {}) {
+  const { keepLaunch = false } = options;
   state.scores = [0, 0];
   state.currentBattle = 1;
   state.matchOver = false;
   updateScoreDisplay();
   $('#victory-overlay').hidden = true;
-  resetLaunchTimer();
+  resetLaunchTimer(!keepLaunch);
 }
 
 function loadMatchScores(scores, battles, matchOver) {
@@ -308,6 +309,9 @@ async function enterCameraZoomMode() {
     await new Promise((resolve) => setTimeout(resolve, LAUNCH_ZOOM_MS));
   } else {
     launchFullscreenActive = !!document.fullscreenElement;
+    if (!document.fullscreenElement) {
+      await enterBrowserFullscreen();
+    }
   }
 }
 

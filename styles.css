@@ -2019,6 +2019,15 @@ body.launch-active #camera-feed-img.mirrored {
   letter-spacing: 0.1em;
 }
 
+.tournament-rundown {
+  margin: 0;
+  padding: 0.45rem 1rem 0.65rem;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  line-height: 1.45;
+}
+
 .tournament-header-actions {
   display: flex;
   align-items: center;

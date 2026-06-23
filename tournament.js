@@ -282,21 +282,22 @@ function buildBracketFromDraw(playerIds) {
   );
 
   matches.revival = [];
-  matches.challenge = makeMatch('challenge', 0, null, null, '四強資格爭奪戰');
+  matches.challenge = makeMatch('challenge', 0, null, null, '四強挑戰');
 
   matches.semi = [
     makeMatch('semi', 0, null, null, '準決賽 1'),
     makeMatch('semi', 1, null, null, '準決賽 2'),
   ];
 
-  matches.final = makeMatch('final', 0, null, null, '總決賽（冠軍）');
-  matches.bronze = makeMatch('final', 1, null, null, '季軍戰');
+  matches.final = makeMatch('final', 0, null, null, '決賽（冠軍）');
 
   return matches;
 }
 
 function setupRevivalBracket(eliminatedIds) {
-  const shuffled = shuffle(eliminatedIds);
+  const prelimLosers = new Set(getPrelimLosers());
+  const entrants = eliminatedIds.filter((id) => prelimLosers.has(id));
+  const shuffled = shuffle(entrants);
   const rev = [];
   for (let i = 0; i < shuffled.length; i += 2) {
     rev.push(makeMatch('revival', rev.length, shuffled[i], shuffled[i + 1] || null, `復活 R1-${Math.floor(i / 2) + 1}`));
@@ -360,13 +361,17 @@ function advanceRevival() {
   }
 }
 
-function getPrelimLosersSoFar() {
+function getPrelimLosers() {
   const prelim = tournamentState.matches.prelim;
   if (!prelim) return [];
   return prelim
     .filter((x) => x.status === 'done' && x.winnerId)
     .map((x) => (x.winnerId === x.p1Id ? x.p2Id : x.p1Id))
     .filter(Boolean);
+}
+
+function getPrelimLosersSoFar() {
+  return getPrelimLosers();
 }
 
 function isQuarterComplete() {
@@ -433,10 +438,7 @@ function advanceWinners() {
   if (!m.prelim) return;
 
   const prelimWinners = m.prelim.map((x) => x.winnerId).filter(Boolean);
-  const prelimLosers = m.prelim
-    .filter((x) => x.status === 'done' && x.winnerId)
-    .map((x) => (x.winnerId === x.p1Id ? x.p2Id : x.p1Id))
-    .filter(Boolean);
+  const prelimLosers = getPrelimLosers();
 
   for (let i = 0; i < 4; i++) {
     if (m.quarter[i]) {
@@ -467,26 +469,18 @@ function advanceWinners() {
     m.semi[1].p2Id = topFour[3] || null;
   } else {
     clearPendingBracketSlots(m.semi);
-    clearPendingBracketSlots([m.final, m.bronze].filter(Boolean));
+    clearPendingBracketSlots(m.final);
   }
 
   const semiWinners = m.semi?.map((x) => x.winnerId).filter(Boolean) || [];
-  const semiLosers = m.semi
-    ?.filter((x) => x.status === 'done' && x.winnerId)
-    .map((x) => (x.winnerId === x.p1Id ? x.p2Id : x.p1Id))
-    .filter(Boolean) || [];
 
   if (semiWinners.length >= 2 && m.final) {
     m.final.p1Id = semiWinners[0];
     m.final.p2Id = semiWinners[1];
   }
-  if (semiLosers.length >= 2 && m.bronze) {
-    m.bronze.p1Id = semiLosers[0];
-    m.bronze.p2Id = semiLosers[1];
-  }
 }
 
-const PHASE_ORDER = { prelim: 0, quarter: 1, revival: 2, challenge: 3, semi: 4, final: 5 };
+const PHASE_ORDER = { prelim: 0, revival: 1, quarter: 2, challenge: 3, semi: 4, final: 5 };
 
 function getAllMatchesFlat() {
   const m = tournamentState.matches;
@@ -498,7 +492,6 @@ function getAllMatchesFlat() {
     ...(m.challenge ? [m.challenge] : []),
     ...(m.semi || []),
     ...(m.final ? [m.final] : []),
-    ...(m.bronze ? [m.bronze] : []),
   ];
 }
 
@@ -767,7 +760,7 @@ function loadMatchToScoreboard(matchId) {
   if (match.status === 'done' && match.scores) {
     loadMatchScores(match.scores, match.battles, true);
   } else {
-    resetMatchScoresOnly();
+    resetMatchScoresOnly({ keepLaunch: useCameraStandby });
     match.liveScores = [0, 0];
     match.liveBattles = 1;
   }
@@ -786,7 +779,9 @@ function loadMatchToScoreboard(matchId) {
 
   if (useCameraStandby && typeof enterCameraStandbyMode === 'function') {
     if (typeof switchAppView === 'function') switchAppView('camera');
-    enterCameraStandbyMode().catch(console.error);
+    enterCameraStandbyMode()
+      .then(() => (typeof enterBrowserFullscreen === 'function' ? enterBrowserFullscreen() : undefined))
+      .catch(console.error);
   } else if (typeof switchAppView === 'function') {
     switchAppView('battle');
   }
@@ -819,7 +814,15 @@ function onTournamentMatchWin(winnerSide, result) {
       side,
       { type: 'log-result' }
     );
-    addLog(`${escapeHtml(wName)} 晉級 · ${escapeHtml(lName)} 止步`, 'system');
+    if (match.phase === 'quarter') {
+      addLog(`${escapeHtml(wName)} 晉級複賽四強 · ${escapeHtml(lName)} 直接淘汰（不進復活賽）`, 'system');
+    } else if (match.phase === 'challenge') {
+      addLog(`${escapeHtml(wName)} 晉級正式四強 · ${escapeHtml(lName)} 直接淘汰`, 'system');
+    } else if (match.phase === 'revival') {
+      addLog(`${escapeHtml(wName)} 晉級 · ${escapeHtml(lName)} 復活賽止步`, 'system');
+    } else {
+      addLog(`${escapeHtml(wName)} 晉級 · ${escapeHtml(lName)} 止步`, 'system');
+    }
     tournamentState.activeMatchId = null;
     persistSession();
     renderTournamentUI();
@@ -873,8 +876,8 @@ function escapeHtml(s) {
 
 const PHASE_STYLES = {
   prelim: { title: '初賽', sub: '16 → 8', cls: 'phase-prelim' },
-  quarter: { title: '複賽', sub: '8 → 4', cls: 'phase-quarter' },
-  revival: { title: '復活賽', sub: '落敗者 · 復活一名', cls: 'phase-revival' },
+  revival: { title: '復活賽', sub: '僅初賽落敗者', cls: 'phase-revival' },
+  quarter: { title: '複賽', sub: '8 → 4 · 落敗直接淘汰', cls: 'phase-quarter' },
   challenge: { title: '四強挑戰', sub: '小羊抽籤', cls: 'phase-challenge' },
   semi: { title: '準決賽', sub: '4 → 2', cls: 'phase-semi' },
   final: { title: '決賽', sub: '冠軍', cls: 'phase-final' },
@@ -971,7 +974,7 @@ function renderBracketSummary() {
   } else if (done === all.length && all.length > 0) {
     nextHint = '<p class="bracket-next-hint done-all">本場賽程已全部完成 🏆</p>';
   } else if (!isOfficialTopFourReady()) {
-    nextHint = '<p class="bracket-next-hint flow-hint">流程：初賽落敗 → 復活賽（一名）→ 小羊抽四強挑戰 → 正式四強</p>';
+    nextHint = '<p class="bracket-next-hint flow-hint">流程：初賽 → 復活賽 → 複賽 → 四強挑戰 → 準決賽 → 決賽</p>';
   }
 
   return `<div class="bracket-summary">
@@ -999,7 +1002,7 @@ function renderRevivalPendingColumn() {
       <span class="bracket-column-sub">${meta.sub}</span>
     </div>
     <div class="bracket-gate-body">
-      <p class="bracket-gate-hint">初賽落敗者等候復活賽</p>
+      <p class="bracket-gate-hint">初賽落敗者進入復活賽（複賽落敗者不會進入）</p>
       <ul class="revival-loser-list">${losers.map((id) => `<li>${escapeHtml(playerName(id))}</li>`).join('')}</ul>
       <p class="bracket-gate-preview">初賽全部完成後開始</p>
     </div>
@@ -1012,13 +1015,13 @@ function renderSemiGateColumn() {
   const meta = PHASE_STYLES.semi;
   let hint = '正式四強待定';
   if (!isQuarterComplete()) {
-    hint = '複賽完成後進入復活／挑戰流程';
+    hint = '完成復活賽與複賽後，小羊抽籤挑戰四強';
   } else if (needsRevivalPath() && !isRevivalComplete()) {
     hint = '進行復活賽，產生逆轉小羊';
   } else if (tournamentState.revivalWinnerId && !tournamentState.matches.challenge?.p2Id) {
     hint = '🐑 請為復活小羊抽籤挑戰四強';
   } else if (tournamentState.revivalWinnerId && !isChallengeComplete()) {
-    hint = '完成四強資格爭奪戰後開賽';
+    hint = '完成四強挑戰後開準決賽';
   }
 
   const preview = isQuarterComplete()
@@ -1093,7 +1096,7 @@ function renderTournamentUI(options = {}) {
   }
 
   const m = tournamentState.matches;
-  const finals = [m.final, m.bronze].filter(Boolean);
+  const finals = m.final ? [m.final] : [];
   const revivalCol = m.revival?.length
     ? renderBracketColumn('revival', m.revival)
     : renderRevivalPendingColumn();
@@ -1105,8 +1108,8 @@ function renderTournamentUI(options = {}) {
     renderBracketSummary() +
     '<div class="bracket-board">' +
     renderBracketColumn('prelim', m.prelim) +
-    renderBracketColumn('quarter', m.quarter) +
     revivalCol +
+    renderBracketColumn('quarter', m.quarter) +
     challengeCol +
     renderSemiGateColumn() +
     renderBracketColumn('final', finals) +
