@@ -82,12 +82,15 @@
     <button type="button" class="app-nav-btn" data-view="tournament">📋 選手 · 賽程</button>
     <button type="button" class="app-nav-btn" data-view="camera">📷 鏡頭</button>
     <button type="button" class="app-nav-btn" data-view="log">📝 戰報</button>
+    <button type="button" class="app-nav-btn" data-view="replay">🎬 戰鬥回放</button>
   </nav>
 
   <main class="arena-layout">
     <div id="view-battle" class="app-view active">
     <!-- Scoreboard -->
     <section class="scoreboard" aria-label="Scoreboard">
+      <div class="broadcast-rail broadcast-rail-red" id="broadcast-rail-p1" aria-hidden="true"></div>
+      <div class="broadcast-rail broadcast-rail-blue" id="broadcast-rail-p2" aria-hidden="true"></div>
       <article class="player-card player-red" data-player="1">
         <div class="player-header">
           <input type="text" id="name-p1" class="player-name" value="Blader 1" maxlength="16" aria-label="Player 1 name">
@@ -310,6 +313,19 @@
             <span class="rec-dot"></span> LIVE
           </div>
         </div>
+        <div class="bey-scan-bar">
+          <div class="bey-scan-bar-top">
+            <label class="toggle bey-scan-toggle">
+              <input type="checkbox" id="bey-scan-toggle"> 陀螺掃描
+            </label>
+            <span id="bey-detect-mode" class="bey-detect-mode" data-mode="motion">動態掃描</span>
+          </div>
+          <p class="bey-scan-status" id="bey-scan-status">動態追蹤或 AI 模型（放置於 models/beyblade/）</p>
+          <div class="bey-scan-actions">
+            <button id="btn-capture-frames" class="btn btn-sm btn-ghost" type="button">📷 收集訓練 frame</button>
+            <button id="btn-reload-model" class="btn btn-sm btn-ghost" type="button">重新載入 AI 模型</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -320,6 +336,37 @@
           <button id="btn-clear-log" class="btn btn-sm btn-ghost">清除</button>
         </div>
         <ul id="battle-log" class="battle-log" aria-live="polite"></ul>
+      </div>
+    </div>
+
+    <div id="view-replay" class="app-view">
+      <div class="replay-panel replay-panel-full">
+        <div class="panel-header">
+          <h2>戰鬥回放 <span id="replay-count" class="replay-count-badge" hidden></span></h2>
+          <button id="btn-clear-replays" class="btn btn-sm btn-ghost" type="button">清除全部</button>
+        </div>
+        <p class="replay-hint">同一 Match 的多局會歸在同一組；有鏡頭時每局另存影片。重播得分會全螢幕播放，並依實際時間軸同步得分事件。</p>
+        <div class="replay-layout">
+          <div class="replay-main">
+            <ul id="replay-list" class="replay-list" aria-live="polite"></ul>
+          </div>
+          <aside id="replay-player" class="replay-player replay-sidebar" hidden>
+            <div id="replay-round-tabs" class="replay-round-tabs" hidden></div>
+            <video id="replay-video" class="replay-video" controls playsinline></video>
+            <div class="replay-player-meta">
+              <h3 id="replay-player-title"></h3>
+              <p id="replay-player-progress"></p>
+            </div>
+            <div id="replay-events" class="replay-events" hidden aria-label="本局得分事件"></div>
+            <div class="replay-controls">
+              <button id="btn-replay-play" class="btn btn-primary" type="button">▶ 重播此局</button>
+              <button id="btn-replay-play-all" class="btn btn-ghost" type="button" hidden>▶ 重播整場 Match</button>
+              <button id="btn-replay-stop" class="btn btn-ghost" type="button">停止</button>
+              <button id="btn-replay-download" class="btn btn-ghost" type="button" hidden>下載影片</button>
+              <button id="btn-replay-close" class="btn btn-ghost" type="button">關閉</button>
+            </div>
+          </aside>
+        </div>
       </div>
     </div>
   </main>
@@ -340,12 +387,52 @@
     </div>
   </div>
 
+  <!-- Replay theater (fullscreen video + score HUD) -->
+  <div id="replay-theater" class="replay-theater" hidden aria-hidden="true">
+    <div class="replay-theater-backdrop" aria-hidden="true">
+      <p class="replay-theater-backdrop-label">得分回放</p>
+    </div>
+    <video id="replay-theater-video" class="replay-theater-video" playsinline></video>
+    <div class="replay-theater-vignette" aria-hidden="true"></div>
+    <div class="replay-theater-hud">
+      <p class="replay-hud-battle" id="replay-hud-battle">第 1 局</p>
+      <div class="replay-hud-scores">
+        <div class="replay-hud-player replay-hud-red">
+          <span id="replay-hud-p1">Blader 1</span>
+          <strong id="replay-hud-s1">0</strong>
+        </div>
+        <span class="replay-hud-vs">VS</span>
+        <div class="replay-hud-player replay-hud-blue">
+          <span id="replay-hud-p2">Blader 2</span>
+          <strong id="replay-hud-s2">0</strong>
+        </div>
+      </div>
+      <p class="replay-hud-label" id="replay-hud-label">回放中…</p>
+    </div>
+    <button id="btn-replay-theater-stop" class="btn btn-ghost btn-replay-theater-stop" type="button">✕ 停止回放</button>
+  </div>
+
+  <!-- Finish center announcement -->
+  <div id="finish-announce" class="finish-announce" hidden aria-live="assertive">
+    <div class="finish-announce-backdrop" aria-hidden="true"></div>
+    <div class="finish-announce-inner">
+      <p class="finish-announce-player"></p>
+      <h2 class="finish-announce-en"></h2>
+      <p class="finish-announce-zh"></p>
+      <p class="finish-announce-points"></p>
+    </div>
+  </div>
+
   <!-- Finish announcement toast -->
-  <div id="finish-toast" class="finish-toast" hidden aria-live="assertive">
+  <div id="finish-toast" class="finish-toast" hidden aria-live="polite">
     <span id="toast-text"></span>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
   <script src="tournament.js"></script>
+  <script src="bey-detect.js"></script>
+  <script src="bey-scan.js"></script>
+  <script src="replay.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

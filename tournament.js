@@ -748,6 +748,8 @@ function loadMatchToScoreboard(matchId) {
   const wasActive = tournamentState.activeMatchId === matchId;
   const useCameraStandby = match.status === 'pending' && !wasActive;
 
+  if (typeof onReplayDiscard === 'function') onReplayDiscard();
+
   tournamentState.activeMatchId = matchId;
   nameEls[0].value = playerName(match.p1Id);
   nameEls[1].value = playerName(match.p2Id);

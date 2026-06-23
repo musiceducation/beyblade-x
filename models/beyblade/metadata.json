@@ -1,0 +1,15 @@
+{
+  "modelUrl": "models/beyblade/model.json",
+  "inputSize": 640,
+  "scoreThreshold": 0.35,
+  "iouThreshold": 0.45,
+  "maxDetections": 4,
+  "inferenceEveryFrames": 3,
+  "classes": ["beyblade", "beyblade_red", "beyblade_blue"],
+  "classSideMap": {
+    "beyblade_red": 1,
+    "beyblade_blue": 2,
+    "beyblade": 0
+  },
+  "notes": "Place Roboflow TensorFlow.js export (model.json + *.bin) in this folder, then reload the app."
+}

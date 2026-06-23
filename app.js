@@ -46,6 +46,7 @@ const state = {
   scores: [0, 0],
   currentBattle: 1,
   matchOver: false,
+  readyForNextRound: false,
   cameraStream: null,
   cameraMode: 'local',
   cameraPeer: null,
@@ -107,14 +108,20 @@ function updateScoreDisplay() {
   }
 }
 
+function renderScoreTrack(container, score) {
+  if (!container) return;
+  container.innerHTML = '';
+  for (let p = 0; p < MATCH_TARGET; p++) {
+    const seg = document.createElement('span');
+    seg.className = 'score-seg' + (p < score ? ' filled' : '');
+    container.appendChild(seg);
+  }
+}
+
 function updateScoreTracks() {
   trackEls.forEach((container, i) => {
-    container.innerHTML = '';
-    for (let p = 0; p < MATCH_TARGET; p++) {
-      const seg = document.createElement('span');
-      seg.className = 'score-seg' + (p < state.scores[i] ? ' filled' : '');
-      container.appendChild(seg);
-    }
+    renderScoreTrack(container, state.scores[i]);
+    renderScoreTrack($(`#broadcast-rail-p${i + 1}`), state.scores[i]);
   });
 }
 
@@ -148,6 +155,45 @@ function showToast(text) {
   }, 2500);
 }
 
+let finishAnnounceHideTimer = null;
+
+function showFinishAnnounce(type, player, points) {
+  const overlay = $('#finish-announce');
+  const replayActive = document.body.classList.contains('replay-theater-active');
+  const inLive = document.body.classList.contains('launch-live');
+  const inLaunch = document.body.classList.contains('launch-active');
+  if (replayActive || inLive || inLaunch) return;
+  if (!overlay) return;
+
+  const f = FINISH_LABELS[type];
+  if (!f) return;
+
+  const name = nameEls[player - 1]?.value?.trim() || `Blader ${player}`;
+  const enEl = overlay.querySelector('.finish-announce-en');
+  const zhEl = overlay.querySelector('.finish-announce-zh');
+  const ptsEl = overlay.querySelector('.finish-announce-points');
+  const playerEl = overlay.querySelector('.finish-announce-player');
+
+  if (enEl) enEl.textContent = f.en;
+  if (zhEl) zhEl.textContent = f.zh;
+  if (ptsEl) ptsEl.textContent = `+${points}`;
+  if (playerEl) playerEl.textContent = name;
+
+  overlay.className = `finish-announce finish-announce--${type} finish-announce--p${player}`;
+  overlay.hidden = false;
+  void overlay.offsetWidth;
+  overlay.classList.add('show');
+
+  if (finishAnnounceHideTimer) clearTimeout(finishAnnounceHideTimer);
+  finishAnnounceHideTimer = setTimeout(() => {
+    overlay.classList.remove('show');
+    finishAnnounceHideTimer = setTimeout(() => {
+      overlay.hidden = true;
+      finishAnnounceHideTimer = null;
+    }, 400);
+  }, 2400);
+}
+
 function awardFinish(player, type) {
   if (state.matchOver) return;
 
@@ -157,18 +203,42 @@ function awardFinish(player, type) {
 
   state.scores[idx] += pts;
   updateScoreDisplay();
-  playerCards[idx].classList.add('score-pop');
-  setTimeout(() => playerCards[idx].classList.remove('score-pop'), 350);
+  const inLive = document.body.classList.contains('launch-live');
+  if (inLive) {
+    const numEl = scoreEls[idx];
+    numEl?.classList.add('score-pop-num');
+    setTimeout(() => numEl?.classList.remove('score-pop-num'), 350);
+    const rail = $(`#broadcast-rail-p${player}`);
+    const filledSeg = rail?.querySelectorAll('.score-seg.filled');
+    const lastFilled = filledSeg?.[filledSeg.length - 1];
+    if (lastFilled) {
+      lastFilled.classList.add('seg-pop');
+      setTimeout(() => lastFilled.classList.remove('seg-pop'), 400);
+    }
+  } else {
+    playerCards[idx].classList.add('score-pop');
+    setTimeout(() => playerCards[idx].classList.remove('score-pop'), 350);
+  }
 
   const label = finishLabel(type);
   addLog(
     `第 ${state.currentBattle} 局 · <strong>${escapeLogText(name)}</strong> — ${label} <span class="log-points">+${pts}</span> · 比分 <span class="log-score">${state.scores[0]} : ${state.scores[1]}</span>`,
     player
   );
-  showToast(`${FINISH_LABELS[type].zh}! +${pts}`);
+  if (typeof onReplayFinish === 'function') {
+    onReplayFinish(player, type, pts, state.scores);
+  }
+  showFinishAnnounce(type, player, pts);
+  if (!state.matchOver && !isTouchDevice()) {
+    setTimeout(() => showToast('按 Space 準備下一局'), 2600);
+  }
 
   triggerFinishEffect(type, player);
   checkMatchEnd();
+  if (!state.matchOver) {
+    state.readyForNextRound = true;
+    updateNextRoundLaunchHint();
+  }
 }
 
 function checkMatchEnd() {
@@ -189,11 +259,17 @@ function nextBattle() {
     $('#victory-overlay').hidden = true;
     updateScoreDisplay();
     addLog('— 新 Match 開始（分數歸零）—');
+    if (typeof onReplayNewMatch === 'function') onReplayNewMatch();
+    if (typeof onReplayDiscard === 'function') onReplayDiscard();
     resetLaunchTimer();
     showToast('新 Match 開始');
     return;
   }
 
+  if (typeof onReplayBattleEnd === 'function') {
+    onReplayBattleEnd([...state.scores], state.currentBattle);
+  }
+  state.readyForNextRound = false;
   state.currentBattle++;
   updateScoreDisplay();
   addLog(`— 第 ${state.currentBattle} 局對戰開始（${state.scores[0]} : ${state.scores[1]}）—`);
@@ -203,6 +279,7 @@ function nextBattle() {
 
 function endMatch(winnerIdx) {
   state.matchOver = true;
+  state.readyForNextRound = false;
   const name = nameEls[winnerIdx].value || `Blader ${winnerIdx + 1}`;
   const score = state.scores[winnerIdx];
   const detail = `率先取得 ${MATCH_TARGET} 分（${score} : ${state.scores[1 - winnerIdx]}）· 共 ${state.currentBattle} 局對戰`;
@@ -234,6 +311,9 @@ function endMatch(winnerIdx) {
       battles: state.currentBattle,
     });
   }
+  if (typeof onReplayMatchEnd === 'function') {
+    onReplayMatchEnd(winnerIdx, state.scores, state.currentBattle);
+  }
 }
 
 function resetMatchScoresOnly(options = {}) {
@@ -241,6 +321,7 @@ function resetMatchScoresOnly(options = {}) {
   state.scores = [0, 0];
   state.currentBattle = 1;
   state.matchOver = false;
+  state.readyForNextRound = false;
   updateScoreDisplay();
   $('#victory-overlay').hidden = true;
   resetLaunchTimer(!keepLaunch);
@@ -261,12 +342,15 @@ function resetMatch(silent) {
   state.scores = [0, 0];
   state.currentBattle = 1;
   state.matchOver = false;
+  state.readyForNextRound = false;
   updateScoreDisplay();
   $('#victory-overlay').hidden = true;
   if (!silent) {
     $('#battle-log').innerHTML = '';
     addLog('新 Match 開始 — 官方 4 分累積制');
   }
+  if (typeof onReplayNewMatch === 'function') onReplayNewMatch();
+  if (typeof onReplayDiscard === 'function') onReplayDiscard();
   resetLaunchTimer();
 }
 
@@ -285,6 +369,7 @@ const GO_SHOOT_SYNC = [
 ];
 const GO_SHOOT_DURATION = 6.528;
 const LAUNCH_ZOOM_MS = 600;
+const PARTICLE_CAP = 160;
 let launchRaf = null;
 let launchStep = -1;
 let goShootFxFired = false;
@@ -406,6 +491,56 @@ function handleLaunchStandbyStart() {
   startLaunchCountdownFromStandby();
 }
 
+function updateNextRoundLaunchHint() {
+  const badge = $('#rec-badge');
+  const relaunch = $('#btn-relaunch');
+  if (!state.readyForNextRound || state.matchOver || launchPlaying) {
+    return;
+  }
+  const inLive = document.body.classList.contains('launch-live')
+    || document.body.classList.contains('launch-active');
+  if (!inLive) return;
+
+  if (badge) {
+    badge.setAttribute(
+      'data-hint',
+      isTouchDevice() ? '點「倒數」下一局' : 'Space 下一局倒數'
+    );
+  }
+  if (relaunch) {
+    relaunch.hidden = false;
+    relaunch.disabled = false;
+  }
+}
+
+async function prepareNextRound() {
+  if (typeof onReplayBattleEnd === 'function') {
+    onReplayBattleEnd([...state.scores], state.currentBattle);
+  }
+  state.currentBattle++;
+  updateScoreDisplay();
+  addLog(`— 第 ${state.currentBattle} 局對戰準備（${state.scores[0]} : ${state.scores[1]}）—`);
+}
+
+async function startQuickNextRoundCountdown() {
+  if (state.matchOver || launchPlaying || launchTimers.length || launchRaf) return;
+  if (!state.readyForNextRound && !document.body.classList.contains('launch-live')) return;
+
+  state.readyForNextRound = false;
+  launchStandbyActive = false;
+  document.body.classList.remove('launch-standby');
+  hideLaunchStandbyHint();
+
+  await prepareNextRound();
+
+  if (!cameraLaunchActive) {
+    if (typeof switchAppView === 'function') switchAppView('camera');
+    await enterCameraZoomMode();
+  }
+
+  await runLaunchCountdownSequence();
+}
+
 async function enterBrowserFullscreen() {
   if (document.fullscreenElement) return;
   try {
@@ -479,6 +614,8 @@ function resetLaunchOverlayFx() {
     flash.style.removeProperty('--flash-opacity');
   }
   document.body.classList.remove('go-shoot-moment', 'anime-impact-frame', 'shake', 'shake-heavy', 'shake-go-shoot');
+  const vp = $('#camera-viewport');
+  if (vp) vp.classList.remove('shake', 'shake-heavy', 'shake-go-shoot');
 }
 
 function resetLaunchFx() {
@@ -535,9 +672,9 @@ function triggerGoShootTextBurst() {
   flashScreen('go-shoot-flash', 120, 0.85);
   burstRing('#ffd60a');
   burstRing('#ff2d55', 50, 2);
-  spawnParticles(55, '#ff2d55', 'burst');
-  spawnParticles(35, '#ffd60a', 'extreme');
-  spawnStreakBurst(30, '#ffffff');
+  spawnParticles(scaledFxCount(32), '#ff2d55', 'burst');
+  spawnParticles(scaledFxCount(20), '#ffd60a', 'extreme');
+  spawnStreakBurst(scaledFxCount(14), '#ffffff');
 
   const impactBurst = $('.launch-impact-burst');
   if (impactBurst) {
@@ -589,6 +726,16 @@ function triggerAnimeImpact(stepIndex) {
   setTimeout(() => document.body.classList.remove('anime-impact-frame'), stepIndex >= 2 ? 140 : 100);
 }
 
+function getLaunchFxScale() {
+  if (window.matchMedia('(hover: none) and (pointer: coarse)').matches) return 0.55;
+  if (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) return 0.72;
+  return 1;
+}
+
+function scaledFxCount(base) {
+  return Math.max(8, Math.round(base * getLaunchFxScale()));
+}
+
 function showLaunchOverlayText(label, stepIndex) {
   const overlayText = $('#launch-camera-text');
   const timerEl = $('#launch-timer');
@@ -599,8 +746,11 @@ function showLaunchOverlayText(label, stepIndex) {
   if (label === 'Go Shoot!') overlayText.classList.add('go-shoot');
   overlayText.textContent = label;
   overlayText.setAttribute('data-text', label);
-  void overlayText.offsetWidth;
-  overlayText.classList.add('show');
+
+  requestAnimationFrame(() => {
+    void overlayText.offsetWidth;
+    overlayText.classList.add('show');
+  });
 
   if (label === 'Go Shoot!') {
     scheduleGoShootTextHide();
@@ -611,7 +761,7 @@ function showLaunchOverlayText(label, stepIndex) {
     timerEl.classList.toggle('go-shoot', label === 'Go Shoot!');
   }
 
-  triggerCountdownStepEffect(label, stepIndex);
+  requestAnimationFrame(() => triggerCountdownStepEffect(label, stepIndex));
 }
 
 function triggerCountdownStepEffect(label, stepIndex) {
@@ -631,16 +781,16 @@ function triggerCountdownStepEffect(label, stepIndex) {
     flashScreen('blue-flash', 80, 0.5);
     shakeScreen('light', 300);
     burstRing(color);
-    spawnParticles(45, color, 'burst');
-    spawnStreakBurst(18, color);
+    spawnParticles(scaledFxCount(28), color, 'burst');
+    spawnStreakBurst(scaledFxCount(12), color);
   } else if (stepIndex === 1) {
     flashScreen('anime-impact', 100, 0.85);
     flashScreen('gold-flash', 90, 0.6);
     shakeScreen('light', 380);
     burstRing(color);
     burstRing('#ffffff', 70, 2);
-    spawnParticles(65, color, 'burst');
-    spawnStreakBurst(26, color);
+    spawnParticles(scaledFxCount(40), color, 'burst');
+    spawnStreakBurst(scaledFxCount(16), color);
   } else {
     flashScreen('anime-impact', 130, 1);
     flashScreen('burst-flash', 150, 0.9);
@@ -648,9 +798,9 @@ function triggerCountdownStepEffect(label, stepIndex) {
     shakeScreen('heavy', 580);
     burstRing(color);
     burstRing('#ffffff', 60, 2);
-    spawnParticles(95, color, 'burst');
-    spawnParticles(35, '#ffffff', 'extreme');
-    spawnStreakBurst(35, color);
+    spawnParticles(scaledFxCount(52), color, 'burst');
+    spawnParticles(scaledFxCount(18), '#ffffff', 'extreme');
+    spawnStreakBurst(scaledFxCount(20), color);
   }
   playBeep(440 + stepIndex * 110, 0.1 + stepIndex * 0.05);
 }
@@ -675,13 +825,17 @@ function syncLaunchVisuals() {
   const steps = getScaledSync();
 
   for (let i = launchStep + 1; i < steps.length; i++) {
-    if (t < steps[i].at) break;
+    if (t < steps[i].at - 0.015) break;
     launchStep = i;
     showLaunchOverlayText(steps[i].label, i);
     if (steps[i].fx) goShootFxFired = true;
   }
 
-  launchRaf = requestAnimationFrame(syncLaunchVisuals);
+  if (launchPlaying && launchStep < steps.length - 1) {
+    launchRaf = requestAnimationFrame(syncLaunchVisuals);
+  } else {
+    launchRaf = null;
+  }
 }
 
 function updateRelaunchButton() {
@@ -710,8 +864,10 @@ function finishLaunchCountdown() {
   el.classList.remove('counting', 'go-shoot');
   btn.disabled = false;
   launchPlaying = false;
+  state.readyForNextRound = false;
   if (goShootAudio) goShootAudio.onended = null;
   addLog('Three, Two, One, Go Shoot!');
+  if (typeof onReplayBattleStart === 'function') onReplayBattleStart();
   document.body.classList.remove('launch-countdown');
   document.body.classList.add('launch-live');
   if (launchOverlayHideTimer) {
@@ -741,12 +897,12 @@ function triggerGoShootMoment() {
   burstRing('#00d4ff', 130);
   burstRing('#ffffff', 200, 2);
 
-  spawnParticles(130, '#ff2d55', 'burst');
-  spawnParticles(85, '#ffd60a', 'extreme');
-  spawnParticles(65, '#00d4ff', 'burst');
-  spawnParticles(45, '#ffffff', 'extreme');
-  spawnStreakBurst(65, '#ffffff');
-  spawnConfetti(55);
+  spawnParticles(scaledFxCount(72), '#ff2d55', 'burst');
+  spawnParticles(scaledFxCount(48), '#ffd60a', 'extreme');
+  spawnParticles(scaledFxCount(36), '#00d4ff', 'burst');
+  spawnParticles(scaledFxCount(24), '#ffffff', 'extreme');
+  spawnStreakBurst(scaledFxCount(32), '#ffffff');
+  spawnConfetti(scaledFxCount(28));
 
   const overlay = $('#launch-camera-overlay');
   if (overlay) {
@@ -764,6 +920,7 @@ function triggerGoShootMoment() {
 
 function resetLaunchTimer(exitFullscreen = true) {
   launchStandbyActive = false;
+  if (!exitFullscreen) state.readyForNextRound = false;
   if (launchPlaying || launchTimers.length || launchRaf) {
     launchTimers.forEach(clearTimeout);
     launchTimers = [];
@@ -809,7 +966,29 @@ async function startLaunchCountdownFallback() {
   launchTimers = [fallbackInterval];
 }
 
-function startLaunchCountdownAudio() {
+async function ensureGoShootAudioReady() {
+  if (!goShootAudio) return false;
+  if (goShootAudio.readyState >= 3) return true;
+  try {
+    goShootAudio.load();
+    await new Promise((resolve, reject) => {
+      const finish = (ok) => {
+        goShootAudio.removeEventListener('canplaythrough', onReady);
+        goShootAudio.removeEventListener('error', onError);
+        ok ? resolve() : reject();
+      };
+      const onReady = () => finish(true);
+      const onError = () => finish(false);
+      goShootAudio.addEventListener('canplaythrough', onReady, { once: true });
+      goShootAudio.addEventListener('error', onError, { once: true });
+    });
+    return true;
+  } catch (_) {
+    return goShootAudio.readyState >= 2;
+  }
+}
+
+async function startLaunchCountdownAudio() {
   goShootAudio.currentTime = 0;
   launchPlaying = true;
   launchStep = -1;
@@ -818,6 +997,8 @@ function startLaunchCountdownAudio() {
   goShootAudio.onended = () => {
     if (launchPlaying) finishLaunchCountdown();
   };
+
+  await ensureGoShootAudioReady();
 
   const playPromise = goShootAudio.play();
   if (playPromise) {
@@ -843,6 +1024,11 @@ async function startLaunchCountdown() {
 
   if (launchStandbyActive) {
     await startLaunchCountdownFromStandby();
+    return;
+  }
+
+  if (state.readyForNextRound || document.body.classList.contains('launch-live')) {
+    await startQuickNextRoundCountdown();
     return;
   }
 
@@ -888,13 +1074,22 @@ function flashScreen(className = '', duration = 80, peakOpacity = 0.85) {
   }, duration);
 }
 
+function getShakeTarget() {
+  if (document.body.classList.contains('replay-theater-active')) return null;
+  return document.body.classList.contains('launch-active')
+    ? $('#camera-viewport')
+    : document.body;
+}
+
 function shakeScreen(intensity = 'light', duration = 400) {
+  const target = getShakeTarget();
+  if (!target) return;
   const cls = intensity === 'go-shoot' ? 'shake-go-shoot'
     : intensity === 'heavy' ? 'shake-heavy' : 'shake';
-  document.body.classList.remove('shake', 'shake-heavy', 'shake-go-shoot');
-  void document.body.offsetWidth;
-  document.body.classList.add(cls);
-  setTimeout(() => document.body.classList.remove(cls), duration);
+  target.classList.remove('shake', 'shake-heavy', 'shake-go-shoot');
+  void target.offsetWidth;
+  target.classList.add(cls);
+  setTimeout(() => target.classList.remove(cls), duration);
 }
 
 function pulseCamera() {
@@ -906,30 +1101,33 @@ function pulseCamera() {
 }
 
 function triggerFinishEffect(type, player) {
+  const replayActive = document.body.classList.contains('replay-theater-active');
+  const inLive = document.body.classList.contains('launch-live');
+  const inLaunch = document.body.classList.contains('launch-active');
+  if (replayActive) return;
+
   const color = player === 1 ? '#ff2d55' : '#00d4ff';
+  const liteFx = inLive || inLaunch;
 
   if (type === 'burst') {
-    document.body.classList.add('shake-heavy');
+    if (!liteFx) shakeScreen('heavy', 600);
     flashScreen('burst-flash');
     burstRing(color);
-    spawnParticles(40, color, 'burst');
+    spawnParticles(scaledFxCount(liteFx ? 18 : 40), color, 'burst');
     playBeep(120, 0.15);
-    setTimeout(() => document.body.classList.remove('shake-heavy'), 600);
   } else if (type === 'extreme') {
-    document.body.classList.add('shake-heavy');
+    if (!liteFx) shakeScreen('heavy', 600);
     flashScreen('extreme-flash');
-    spawnParticles(80, '#bf5af2', 'extreme');
-    spawnParticles(40, '#ffd60a', 'extreme');
+    spawnParticles(scaledFxCount(liteFx ? 28 : 80), '#bf5af2', 'extreme');
+    spawnParticles(scaledFxCount(liteFx ? 14 : 40), '#ffd60a', 'extreme');
     playBeep(80, 0.25);
-    setTimeout(() => document.body.classList.remove('shake-heavy'), 600);
   } else if (type === 'over') {
-    document.body.classList.add('shake');
+    if (!liteFx) shakeScreen('light', 400);
     flashScreen();
-    spawnParticles(25, '#ffd60a', 'over');
+    spawnParticles(scaledFxCount(liteFx ? 10 : 25), '#ffd60a', 'over');
     playBeep(300, 0.1);
-    setTimeout(() => document.body.classList.remove('shake'), 400);
   } else {
-    spawnParticles(15, color, 'spin');
+    spawnParticles(scaledFxCount(liteFx ? 8 : 15), color, 'spin');
     playBeep(520, 0.06);
   }
 }
@@ -1022,29 +1220,38 @@ class Particle {
   }
 
   draw() {
-    ctx.save();
-    ctx.globalAlpha = Math.max(0, this.life);
-    ctx.translate(this.x, this.y);
-    ctx.rotate(this.rotation);
+    const alpha = Math.max(0, this.life);
+    if (alpha <= 0) return;
+    ctx.globalAlpha = alpha;
     ctx.fillStyle = this.color;
 
     if (this.type === 'extreme') {
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.rotate(this.rotation);
       ctx.beginPath();
       ctx.moveTo(0, -this.size);
       ctx.lineTo(this.size * 0.6, this.size * 0.4);
       ctx.lineTo(-this.size * 0.6, this.size * 0.4);
       ctx.closePath();
       ctx.fill();
+      ctx.restore();
     } else if (this.type === 'streak') {
-      ctx.fillRect(-this.size * this.stretch, -this.size / 2, this.size * this.stretch * 2, this.size);
+      const w = this.size * this.stretch * 2;
+      const h = this.size;
+      ctx.fillRect(this.x - w / 2, this.y - h / 2, w, h);
     } else {
-      ctx.fillRect(-this.size / 2, -this.size / 2, this.size, this.size);
+      const half = this.size / 2;
+      ctx.fillRect(this.x - half, this.y - half, this.size, this.size);
     }
-    ctx.restore();
+    ctx.globalAlpha = 1;
   }
 }
 
 function spawnParticles(count, color, type) {
+  const room = Math.max(0, PARTICLE_CAP - particles.length);
+  count = Math.min(count, room);
+  if (count <= 0) return;
   const cx = window.innerWidth / 2;
   const cy = window.innerHeight / 2;
   for (let i = 0; i < count; i++) {
@@ -1054,6 +1261,9 @@ function spawnParticles(count, color, type) {
 }
 
 function spawnStreakBurst(count, color) {
+  const room = Math.max(0, PARTICLE_CAP - particles.length);
+  count = Math.min(count, room);
+  if (count <= 0) return;
   const cx = window.innerWidth / 2;
   const cy = window.innerHeight / 2;
   for (let i = 0; i < count; i++) {
@@ -1063,6 +1273,9 @@ function spawnStreakBurst(count, color) {
 }
 
 function spawnConfetti(count) {
+  const room = Math.max(0, PARTICLE_CAP - particles.length);
+  count = Math.min(count, room);
+  if (count <= 0) return;
   const colors = ['#ff2d55', '#00d4ff', '#ffd60a', '#bf5af2', '#fff'];
   for (let i = 0; i < count; i++) {
     const x = Math.random() * window.innerWidth;
@@ -1539,6 +1752,7 @@ function showCameraActive(useVideo) {
   $('#btn-cam-start').disabled = true;
   $('#btn-cam-stop').disabled = false;
   updateRemoteCamButtons();
+  if (typeof onCameraFeedActive === 'function') onCameraFeedActive();
 }
 
 function hideCameraFeed() {
@@ -1555,6 +1769,7 @@ function hideCameraFeed() {
   $('#btn-cam-start').disabled = false;
   $('#btn-cam-stop').disabled = true;
   updateRemoteCamButtons();
+  if (typeof onCameraFeedStopped === 'function') onCameraFeedStopped();
 }
 
 function isBuiltInMacCamera(label) {
@@ -2102,10 +2317,20 @@ function init() {
   });
 
   document.addEventListener('keydown', (e) => {
+    const tag = e.target?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
     if ((e.key === ' ' || e.code === 'Space') && launchStandbyActive && !launchPlaying) {
       e.preventDefault();
       startLaunchCountdownFromStandby();
       return;
+    }
+    if ((e.key === ' ' || e.code === 'Space') && !state.matchOver && !launchPlaying && !launchStandbyActive) {
+      if (state.readyForNextRound || document.body.classList.contains('launch-live')) {
+        e.preventDefault();
+        startQuickNextRoundCountdown();
+        return;
+      }
     }
     if (e.key === 'Escape' && (cameraLaunchActive || document.body.classList.contains('launch-active'))) {
       resetLaunchTimer();
@@ -2145,6 +2370,7 @@ function init() {
 
   syncFinishButtons();
   initTournament();
+  initReplay();
   initAppViews();
 
   const camPref = sessionStorage.getItem('cam-source-pref');
@@ -2162,6 +2388,7 @@ function init() {
     state.lanBaseUrl = url;
     state.phoneCamBaseUrl = await getPhoneCamBaseUrl();
   });
+  if (goShootAudio) goShootAudio.load();
   listCameras({ requestPermission: true });
 }
 
