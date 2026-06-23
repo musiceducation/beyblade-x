@@ -50,6 +50,9 @@ const state = {
   cameraMode: 'local',
   cameraPeer: null,
   activeRemoteCall: null,
+  signalPollTimer: null,
+  djiRefreshTimer: null,
+  djiInfo: null,
   remoteRoomId: null,
   remoteLink: '',
   lanBaseUrl: '',
@@ -125,6 +128,15 @@ function addLog(message, team = 'system', opts = {}) {
   log.prepend(li);
 }
 
+function escapeLogText(value) {
+  if (typeof escapeHtml === 'function') return escapeHtml(value);
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 function showToast(text) {
   const toast = $('#finish-toast');
   $('#toast-text').textContent = text;
@@ -150,7 +162,7 @@ function awardFinish(player, type) {
 
   const label = finishLabel(type);
   addLog(
-    `第 ${state.currentBattle} 局 · <strong>${name}</strong> — ${label} <span class="log-points">+${pts}</span> · 比分 <span class="log-score">${state.scores[0]} : ${state.scores[1]}</span>`,
+    `第 ${state.currentBattle} 局 · <strong>${escapeLogText(name)}</strong> — ${label} <span class="log-points">+${pts}</span> · 比分 <span class="log-score">${state.scores[0]} : ${state.scores[1]}</span>`,
     player
   );
   showToast(`${FINISH_LABELS[type].zh}! +${pts}`);
@@ -197,15 +209,19 @@ function endMatch(winnerIdx) {
 
   $('#victory-name').textContent = name;
   $('#victory-detail').textContent = detail;
+  const inTournament = typeof tournamentState !== 'undefined' && tournamentState.activeMatchId;
+  if (!inTournament && typeof hideVictorySchedulePanel === 'function') {
+    hideVictorySchedulePanel();
+    $('#btn-dismiss-victory').textContent = '繼續';
+  }
   $('#victory-overlay').hidden = false;
 
-  const inTournament = typeof tournamentState !== 'undefined' && tournamentState.activeMatchId;
   const scoreLine = `<span class="log-score">${score} : ${state.scores[1 - winnerIdx]}</span>`;
   if (inTournament) {
     addLog(`Match 結束 · 比分 ${scoreLine} · ${state.currentBattle} 局`, winnerIdx + 1);
   } else {
     addLog(
-      `🏆 本場 Match 勝者：<strong>${name}</strong> · ${scoreLine} · ${state.currentBattle} 局`,
+      `🏆 本場 Match 勝者：<strong>${escapeLogText(name)}</strong> · ${scoreLine} · ${state.currentBattle} 局`,
       winnerIdx + 1,
       { type: 'log-result' }
     );
@@ -274,51 +290,190 @@ let goShootFxFired = false;
 let cameraLaunchActive = false;
 let launchEnteredFullscreen = false;
 
+let launchFullscreenActive = false;
+let launchStandbyActive = false;
+
+async function enterCameraZoomMode() {
+  if (!state.cameraStream && $('#cam-source').value === 'local') {
+    try {
+      await startLocalCamera();
+    } catch (_) { /* continue with placeholder */ }
+  }
+
+  if (!cameraLaunchActive) {
+    cameraLaunchActive = true;
+    document.body.classList.add('launch-active');
+    showExitLaunchButton();
+    await enterBrowserFullscreen();
+    await new Promise((resolve) => setTimeout(resolve, LAUNCH_ZOOM_MS));
+  } else {
+    launchFullscreenActive = !!document.fullscreenElement;
+  }
+}
+
+function showLaunchStandbyHint() {
+  const overlayText = $('#launch-camera-text');
+  const hint = $('.launch-camera-hint');
+  const startBtn = $('#btn-start-countdown');
+  const touch = isTouchDevice();
+
+  if (overlayText) {
+    overlayText.className = 'launch-camera-text launch-standby-text show';
+    overlayText.textContent = 'Ready';
+    overlayText.setAttribute('data-text', 'Ready');
+  }
+  if (hint) {
+    hint.textContent = touch
+      ? '點「開始倒數」或 Three, Two, One, Go Shoot! · Esc 退出'
+      : '按 Space 開始 Three, Two, One, Go Shoot! · Esc 退出';
+  }
+  if (startBtn) startBtn.hidden = !touch;
+
+  const timerEl = $('#launch-timer');
+  if (timerEl) {
+    timerEl.textContent = 'Ready';
+    timerEl.classList.remove('counting', 'go-shoot');
+  }
+}
+
+function hideLaunchStandbyHint() {
+  const startBtn = $('#btn-start-countdown');
+  if (startBtn) startBtn.hidden = true;
+}
+
+async function enterCameraStandbyMode() {
+  if (state.matchOver || launchPlaying) return;
+
+  document.body.classList.remove('launch-live', 'launch-countdown');
+  await enterCameraZoomMode();
+
+  launchStandbyActive = true;
+  document.body.classList.add('launch-standby');
+
+  const overlay = $('#launch-camera-overlay');
+  overlay.hidden = false;
+  overlay.setAttribute('aria-hidden', 'false');
+  showLaunchStandbyHint();
+
+  const badge = $('#rec-badge');
+  if (badge) badge.setAttribute('data-hint', isTouchDevice() ? '點下方開始' : 'Space 開始倒數');
+  const relaunch = $('#btn-relaunch');
+  if (relaunch) relaunch.hidden = true;
+}
+
+async function runLaunchCountdownSequence() {
+  const el = $('#launch-timer');
+  const btn = $('#btn-launch');
+  const relaunchBtn = $('#btn-relaunch');
+  if (launchPlaying || launchTimers.length || launchRaf) return;
+
+  hideLaunchStandbyHint();
+  btn.disabled = true;
+  if (relaunchBtn) relaunchBtn.disabled = true;
+  el.classList.add('counting');
+  el.classList.remove('go-shoot');
+  el.textContent = '…';
+
+  const overlay = $('#launch-camera-overlay');
+  overlay.hidden = false;
+  overlay.setAttribute('aria-hidden', 'false');
+  clearLaunchOverlayText();
+  document.body.classList.add('launch-countdown');
+  document.body.classList.remove('launch-standby');
+
+  if ($('#voice-countdown').checked && goShootAudio) {
+    startLaunchCountdownAudio();
+  } else {
+    await startLaunchCountdownFallback();
+  }
+}
+
+async function startLaunchCountdownFromStandby() {
+  if (!launchStandbyActive || state.matchOver) return;
+  if (launchPlaying || launchTimers.length || launchRaf) return;
+  launchStandbyActive = false;
+  await runLaunchCountdownSequence();
+}
+
 async function enterBrowserFullscreen() {
   if (document.fullscreenElement) return;
   try {
     await document.documentElement.requestFullscreen();
     launchEnteredFullscreen = true;
+    launchFullscreenActive = true;
   } catch (_) { /* user gesture / browser policy */ }
 }
 
 function exitBrowserFullscreen() {
+  launchFullscreenActive = false;
   if (launchEnteredFullscreen && document.fullscreenElement) {
     document.exitFullscreen().catch(() => {});
   }
   launchEnteredFullscreen = false;
 }
 
+function showExitLaunchButton() {
+  const btn = $('#btn-exit-launch');
+  if (btn) btn.hidden = false;
+}
+
+function hideExitLaunchButton() {
+  const btn = $('#btn-exit-launch');
+  if (btn) btn.hidden = true;
+}
+
+function isTouchDevice() {
+  return window.matchMedia('(hover: none)').matches || 'ontouchstart' in window;
+}
+
 function enterCameraLaunchMode() {
-  return new Promise(async (resolve) => {
-    if (!state.cameraStream && $('#cam-source').value === 'local') {
-      try {
-        await startLocalCamera();
-      } catch (_) { /* continue with placeholder */ }
-    }
-
-    const overlay = $('#launch-camera-overlay');
-    overlay.hidden = false;
-    overlay.setAttribute('aria-hidden', 'false');
-    clearLaunchOverlayText();
-    document.body.classList.add('launch-countdown');
-
-    if (!cameraLaunchActive) {
-      cameraLaunchActive = true;
-      document.body.classList.add('launch-active');
-      await enterBrowserFullscreen();
-      setTimeout(resolve, LAUNCH_ZOOM_MS);
-    } else {
-      resolve();
-    }
-  });
+  return enterCameraZoomMode().then(() => runLaunchCountdownSequence());
 }
 
 let launchOverlayHideTimer = null;
 let goShootTextHideTimer = null;
 
-const GO_SHOOT_TEXT_VISIBLE_MS = 580;
-const GO_SHOOT_TEXT_FADE_MS = 160;
+const GO_SHOOT_TEXT_VISIBLE_MS = 780;
+const GO_SHOOT_TEXT_BURST_MS = 420;
+
+let burstRingTimers = [];
+let impactBurstTimer = null;
+
+function resetBurstRings() {
+  burstRingTimers.forEach(clearTimeout);
+  burstRingTimers = [];
+  ['#burst-ring', '#burst-ring-2', '#launch-burst-ring', '#launch-burst-ring-2'].forEach((sel) => {
+    const ring = $(sel);
+    if (!ring) return;
+    ring.classList.remove('animate');
+    ring.style.removeProperty('width');
+    ring.style.removeProperty('height');
+    ring.style.removeProperty('opacity');
+    ring.style.removeProperty('border-color');
+    ring.style.removeProperty('color');
+  });
+}
+
+function resetLaunchOverlayFx() {
+  if (impactBurstTimer) {
+    clearTimeout(impactBurstTimer);
+    impactBurstTimer = null;
+  }
+  const impactBurst = $('.launch-impact-burst');
+  if (impactBurst) impactBurst.className = 'launch-impact-burst';
+  const flash = $('#flash-overlay');
+  if (flash) {
+    flash.className = '';
+    flash.classList.remove('active');
+    flash.style.removeProperty('--flash-opacity');
+  }
+  document.body.classList.remove('go-shoot-moment', 'anime-impact-frame', 'shake', 'shake-heavy', 'shake-go-shoot');
+}
+
+function resetLaunchFx() {
+  resetBurstRings();
+  resetLaunchOverlayFx();
+}
 
 function hideLaunchOverlay() {
   if (launchOverlayHideTimer) {
@@ -333,8 +488,11 @@ function hideLaunchOverlay() {
 
 function exitCameraLaunchMode(overlayDelay = 0) {
   cameraLaunchActive = false;
-  document.body.classList.remove('launch-active', 'launch-countdown', 'launch-live');
+  launchStandbyActive = false;
+  document.body.classList.remove('launch-active', 'launch-countdown', 'launch-live', 'launch-standby');
   exitBrowserFullscreen();
+  hideExitLaunchButton();
+  resetLaunchFx();
   if (launchOverlayHideTimer) {
     clearTimeout(launchOverlayHideTimer);
     launchOverlayHideTimer = null;
@@ -362,14 +520,34 @@ function clearLaunchOverlayText() {
   overlayText.className = 'launch-camera-text';
 }
 
+function triggerGoShootTextBurst() {
+  flashScreen('go-shoot-flash', 120, 0.85);
+  burstRing('#ffd60a');
+  burstRing('#ff2d55', 50, 2);
+  spawnParticles(55, '#ff2d55', 'burst');
+  spawnParticles(35, '#ffd60a', 'extreme');
+  spawnStreakBurst(30, '#ffffff');
+
+  const impactBurst = $('.launch-impact-burst');
+  if (impactBurst) {
+    impactBurst.className = 'launch-impact-burst show step-3';
+    if (impactBurstTimer) clearTimeout(impactBurstTimer);
+    impactBurstTimer = setTimeout(() => {
+      impactBurst.className = 'launch-impact-burst';
+      impactBurstTimer = null;
+    }, 560);
+  }
+}
+
 function scheduleGoShootTextHide() {
   if (goShootTextHideTimer) clearTimeout(goShootTextHideTimer);
   goShootTextHideTimer = setTimeout(() => {
     const overlayText = $('#launch-camera-text');
     if (overlayText && overlayText.textContent) {
       overlayText.classList.remove('show');
-      overlayText.classList.add('fade-out');
-      setTimeout(clearLaunchOverlayText, GO_SHOOT_TEXT_FADE_MS);
+      overlayText.classList.add('burst-out');
+      triggerGoShootTextBurst();
+      setTimeout(clearLaunchOverlayText, GO_SHOOT_TEXT_BURST_MS);
     }
     goShootTextHideTimer = null;
   }, GO_SHOOT_TEXT_VISIBLE_MS);
@@ -387,8 +565,10 @@ function triggerAnimeImpact(stepIndex) {
 
   if (impactBurst) {
     impactBurst.className = `launch-impact-burst show step-${stepIndex}`;
-    setTimeout(() => {
+    if (impactBurstTimer) clearTimeout(impactBurstTimer);
+    impactBurstTimer = setTimeout(() => {
       impactBurst.className = 'launch-impact-burst';
+      impactBurstTimer = null;
     }, 560);
   }
 
@@ -529,7 +709,8 @@ function finishLaunchCountdown() {
   }
   launchOverlayHideTimer = setTimeout(hideLaunchOverlay, 200);
   const badge = $('#rec-badge');
-  if (badge) badge.setAttribute('data-hint', 'Esc 退出全屏');
+  if (badge) badge.setAttribute('data-hint', isTouchDevice() ? '點右上角退出' : 'Esc 退出全屏');
+  showExitLaunchButton();
   updateRelaunchButton();
 }
 
@@ -571,6 +752,7 @@ function triggerGoShootMoment() {
 }
 
 function resetLaunchTimer(exitFullscreen = true) {
+  launchStandbyActive = false;
   if (launchPlaying || launchTimers.length || launchRaf) {
     launchTimers.forEach(clearTimeout);
     launchTimers = [];
@@ -646,24 +828,15 @@ function startLaunchCountdownAudio() {
 
 async function startLaunchCountdown() {
   if (state.matchOver) return;
-  const el = $('#launch-timer');
-  const btn = $('#btn-launch');
-  const relaunchBtn = $('#btn-relaunch');
   if (launchPlaying || launchTimers.length || launchRaf) return;
 
-  btn.disabled = true;
-  if (relaunchBtn) relaunchBtn.disabled = true;
-  el.classList.add('counting');
-  el.classList.remove('go-shoot');
-  el.textContent = '…';
-
-  await enterCameraLaunchMode();
-
-  if ($('#voice-countdown').checked && goShootAudio) {
-    startLaunchCountdownAudio();
-  } else {
-    await startLaunchCountdownFallback();
+  if (launchStandbyActive) {
+    await startLaunchCountdownFromStandby();
+    return;
   }
+
+  if (typeof switchAppView === 'function') switchAppView('camera');
+  await enterCameraStandbyMode();
 }
 
 function getPhaseLabel() {
@@ -751,14 +924,31 @@ function triggerFinishEffect(type, player) {
 }
 
 function burstRing(color, delay = 0, ringIndex = 1) {
-  setTimeout(() => {
-    const ring = ringIndex === 2 ? $('#burst-ring-2') : $('#burst-ring');
-    if (!ring) return;
-    ring.style.borderColor = color;
-    ring.classList.remove('animate');
-    void ring.offsetWidth;
-    ring.classList.add('animate');
+  const id = setTimeout(() => {
+    const selectors = ringIndex === 2
+      ? ['#burst-ring-2', '#launch-burst-ring-2']
+      : ['#burst-ring', '#launch-burst-ring'];
+
+    selectors.forEach((sel) => {
+      const ring = $(sel);
+      if (!ring) return;
+      ring.style.color = color;
+      ring.style.borderColor = color;
+      ring.style.removeProperty('width');
+      ring.style.removeProperty('height');
+      ring.style.removeProperty('opacity');
+      ring.classList.remove('animate');
+      void ring.offsetWidth;
+      ring.classList.add('animate');
+      ring.addEventListener('animationend', () => {
+        ring.classList.remove('animate');
+        ring.style.removeProperty('width');
+        ring.style.removeProperty('height');
+        ring.style.removeProperty('opacity');
+      }, { once: true });
+    });
   }, delay);
+  burstRingTimers.push(id);
 }
 
 function playVictoryEffect(player, isMatch) {
@@ -894,29 +1084,69 @@ function generateRoomCode() {
   return code;
 }
 
+function pickBestLanIp(ips) {
+  const list = [...ips];
+  const private = (ip) => {
+    const p = ip.split('.').map(Number);
+    if (p[0] === 192 && p[1] === 168) return 3;
+    if (p[0] === 10) return 2;
+    if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return 1;
+    return 0;
+  };
+  list.sort((a, b) => private(b) - private(a));
+  return list[0] || null;
+}
+
+async function fetchLanIpFromServer() {
+  try {
+    const r = await fetch('/lan-ip.json', { cache: 'no-store' });
+    if (r.ok) {
+      const data = await r.json();
+      if (data.ip && !data.ip.startsWith('127.')) return data.ip;
+    }
+  } catch (_) { /* offline or old server */ }
+  return null;
+}
+
 function detectLocalIp() {
   return new Promise((resolve) => {
+    let done = false;
+    const finish = async (ip) => {
+      if (done) return;
+      done = true;
+      if (ip) {
+        resolve(ip);
+        return;
+      }
+      resolve(await fetchLanIpFromServer());
+    };
+
     if (!window.RTCPeerConnection) {
-      resolve(null);
+      finish(null);
       return;
     }
+
+    const ips = new Set();
     const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
     pc.createDataChannel('');
     pc.onicecandidate = (e) => {
-      if (!e.candidate) return;
+      if (!e.candidate) {
+        finish(pickBestLanIp(ips));
+        return;
+      }
       const match = e.candidate.candidate.match(/(\d+\.\d+\.\d+\.\d+)/);
-      if (match && !match[1].startsWith('127.')) {
-        pc.close();
-        resolve(match[1]);
+      if (match) {
+        const ip = match[1];
+        if (!ip.startsWith('127.') && !ip.startsWith('169.254.')) ips.add(ip);
       }
     };
     pc.createOffer()
       .then((o) => pc.setLocalDescription(o))
-      .catch(() => resolve(null));
+      .catch(() => finish(null));
     setTimeout(() => {
       pc.close();
-      resolve(null);
-    }, 2500);
+      finish(pickBestLanIp(ips));
+    }, 3000);
   });
 }
 
@@ -955,26 +1185,24 @@ function hostPeerId(room) {
 
 async function getPhoneCamBaseUrl() {
   const basePath = location.pathname.replace(/[^/]*$/, '') || '/';
-  if (location.protocol === 'https:' && Number(location.port) === PHONE_HTTPS_PORT) {
-    return `${location.origin}${basePath}`;
-  }
   const host = location.hostname;
   let addr = host;
   if (host === 'localhost' || host === '127.0.0.1') {
     addr = (await detectLocalIp()) || host;
   }
+  if (addr === 'localhost' || addr === '127.0.0.1') return '';
   return `https://${addr}:${PHONE_HTTPS_PORT}${basePath}`;
 }
 
 async function getHostAppHttpsUrl() {
   const basePath = location.pathname.replace(/[^/]*$/, '') || '/';
-  if (location.protocol === 'https:' && Number(location.port) === PHONE_HTTPS_PORT) {
-    return `${location.origin}${basePath === '/' ? '/' : basePath}`;
-  }
   const host = location.hostname;
   let addr = host;
   if (host === 'localhost' || host === '127.0.0.1') {
     addr = (await detectLocalIp()) || host;
+  }
+  if (addr === 'localhost' || addr === '127.0.0.1') {
+    return `https://localhost:${PHONE_HTTPS_PORT}${basePath === '/' ? '/' : basePath}`;
   }
   return `https://${addr}:${PHONE_HTTPS_PORT}${basePath}`;
 }
@@ -1033,11 +1261,34 @@ async function prepareRemoteRoom(forceNew = false) {
   state.remoteLink = getRemoteCamUrl(state.remoteRoomId);
 
   if (!state.remoteLink) {
-    setRemoteStatus('無法取得 LAN IP，QR 可能無法使用', false);
+    setRemoteStatus('正在取得本機 IP…', null);
     state.remoteLink = `https://[主機IP]:${PHONE_HTTPS_PORT}/remote-cam.html?room=${state.remoteRoomId}`;
+    retryResolvePhoneUrl();
   }
 
   updateRemoteQrDisplay();
+}
+
+let phoneUrlRetryTimer = null;
+
+async function retryResolvePhoneUrl(attempt = 0) {
+  if (phoneUrlRetryTimer) clearTimeout(phoneUrlRetryTimer);
+  if (state.remoteLink && !state.remoteLink.includes('[主機IP]')) return;
+
+  state.phoneCamBaseUrl = await getPhoneCamBaseUrl();
+  const url = getRemoteCamUrl(state.remoteRoomId);
+  if (url) {
+    state.remoteLink = url;
+    setRemoteStatus(`等待手機掃 QR（房間 ${state.remoteRoomId}）`, true);
+    updateRemoteQrDisplay();
+    return;
+  }
+
+  if (attempt < 8) {
+    phoneUrlRetryTimer = setTimeout(() => retryResolvePhoneUrl(attempt + 1), 1000);
+  } else {
+    setRemoteStatus('無法取得 LAN IP，請改用 https://你的IP:8443/ 開啟', false);
+  }
 }
 
 function updateRemoteQrDisplay() {
@@ -1082,9 +1333,13 @@ function attachRemoteStream(remoteStream) {
   addLog('手機 / 平板鏡頭已連線 — 畫面已顯示');
 
   const tryPlay = () => {
-    video.play().catch(() => {});
+    video.muted = true;
+    video.playsInline = true;
+    const p = video.play();
+    if (p && p.catch) p.catch(() => setTimeout(tryPlay, 300));
   };
   tryPlay();
+  setTimeout(tryPlay, 500);
   if (remoteStream.getVideoTracks().length === 0) {
     remoteStream.onaddtrack = () => {
       tryPlay();
@@ -1130,19 +1385,136 @@ function bindRemoteCall(call) {
   });
 }
 
+async function signalRequest(kind, payload) {
+  const room = String(state.remoteRoomId || '').trim().toUpperCase();
+  if (!room) return {};
+  const url = `/signal/${encodeURIComponent(room)}/${kind}`;
+  if (payload) {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      cache: 'no-store',
+    });
+    return r.ok ? r.json() : {};
+  }
+  const r = await fetch(url, { cache: 'no-store' });
+  return r.ok ? r.json() : {};
+}
+
+function waitForIceGathering(pc, timeout = 2500) {
+  if (pc.iceGatheringState === 'complete') return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, timeout);
+    function done() {
+      clearTimeout(timer);
+      pc.removeEventListener('icegatheringstatechange', onChange);
+      resolve();
+    }
+    function onChange() {
+      if (pc.iceGatheringState === 'complete') done();
+    }
+    pc.addEventListener('icegatheringstatechange', onChange);
+  });
+}
+
+function stopSignalPolling() {
+  if (state.signalPollTimer) {
+    clearTimeout(state.signalPollTimer);
+    state.signalPollTimer = null;
+  }
+}
+
+async function pollForPhoneOffer() {
+  stopSignalPolling();
+  if ($('#cam-source').value !== 'remote' || !state.cameraPeer) return;
+
+  try {
+    const offer = await signalRequest('offer');
+    if (offer && offer.type === 'offer') {
+      const pc = state.cameraPeer;
+      setRemoteStatus('收到手機，正在建立畫面…', null);
+      await pc.setRemoteDescription(offer);
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      await waitForIceGathering(pc);
+      await signalRequest('answer', pc.localDescription);
+      setRemoteStatus('已回覆手機，等待畫面…', true);
+      return;
+    }
+  } catch (err) {
+    console.error(err);
+    setRemoteStatus('本機信令錯誤，正在重試…', false);
+  }
+
+  state.signalPollTimer = setTimeout(pollForPhoneOffer, 600);
+}
+
+function isLocalHost() {
+  const host = location.hostname;
+  return host === 'localhost' || host === '127.0.0.1';
+}
+
+async function redirectHostToLanIfNeeded() {
+  if (!isLocalHost()) return true;
+  const ip = await detectLocalIp();
+  if (!ip) return false;
+  sessionStorage.setItem('cam-source-pref', 'remote');
+  sessionStorage.setItem(VIEW_STORAGE_KEY, 'camera');
+  const target = `https://${ip}:${PHONE_HTTPS_PORT}${location.pathname}${location.search}${location.hash}`;
+  location.replace(target);
+  return false;
+}
+
+async function updateLocalhostWarn() {
+  const el = $('#host-secure-warn');
+  if (!el || $('#cam-source').value !== 'remote' || !isLocalHost()) {
+    if (el && $('#cam-source').value === 'remote' && !isLocalHost()) el.hidden = true;
+    return;
+  }
+  const ip = await detectLocalIp();
+  el.hidden = false;
+  if (ip) {
+    const url = `https://${ip}:${PHONE_HTTPS_PORT}/`;
+    el.innerHTML =
+      '<strong>localhost 無法接收手機畫面</strong><br>' +
+      '手機連線需要主機用區網 IP 開啟。<br>' +
+      `<a href="${url}">👉 點此改用 ${url}</a>`;
+  } else {
+    el.innerHTML =
+      '<strong>localhost 無法接收手機畫面</strong><br>' +
+      '請改用 <code>https://你的IP:8443/</code> 開啟此頁。';
+  }
+}
+
 function updateCamSourcePanels() {
   const mode = $('#cam-source').value;
   state.cameraMode = mode;
   $('#cam-local-panel').hidden = mode !== 'local';
   $('#cam-remote-panel').hidden = mode !== 'remote';
+  $('#cam-dji-panel').hidden = mode !== 'dji';
   $('#cam-url-panel').hidden = mode !== 'url';
+  const mirrorWrap = $('#cam-mirror-wrap');
+  if (mirrorWrap) mirrorWrap.hidden = mode === 'remote' || mode === 'dji';
   if (mode === 'remote') {
-    prepareRemoteRoom(false)
-      .then(() => {
-        updateHostSecureWarning();
-        return ensureRemoteHostPeer();
-      })
-      .catch(console.error);
+    redirectHostToLanIfNeeded().then((stay) => {
+      if (!stay) return;
+      prepareRemoteRoom(false)
+        .then(() => {
+          updateHostSecureWarning();
+          updateLocalhostWarn();
+          return ensureRemoteHostPeer();
+        })
+        .catch(console.error);
+    });
+  } else if ($('#host-secure-warn')) {
+    $('#host-secure-warn').hidden = true;
+  }
+  if (mode === 'dji') {
+    loadDjiInfo().catch(console.error);
+  }
+  if (mode === 'local') {
+    listCameras({ requestPermission: true, preferExternal: false });
   }
 }
 
@@ -1174,66 +1546,158 @@ function hideCameraFeed() {
   updateRemoteCamButtons();
 }
 
-async function listCameras() {
+function isBuiltInMacCamera(label) {
+  return /macbook|facetime|built-in|內建|isight/i.test(label || '');
+}
+
+function isExternalCameraLabel(label) {
+  return /dji|osmo|action|pocket|usb|capture|elgato|cam link|continuity|iphone|sony|canon|logitech|webcam|uvc|hdmi/i.test(label || '');
+}
+
+async function ensureCameraPermissionForEnumerate() {
+  if (!navigator.mediaDevices?.enumerateDevices) return false;
   try {
+    let devices = await navigator.mediaDevices.enumerateDevices();
+    if (devices.some((d) => d.kind === 'videoinput' && d.label)) return true;
+    const tmp = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    tmp.getTracks().forEach((t) => t.stop());
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function updateCamDeviceHint(camCount) {
+  const hint = $('#cam-local-hint');
+  const djiHint = $('#cam-dji-usb-hint');
+  if (!hint || !djiHint) return;
+  const select = $('#cam-device');
+  const hasExternal = [...select.options].some((o) => o.value && isExternalCameraLabel(o.textContent));
+  const onlyBuiltIn = camCount <= 1 || [...select.options].every((o) => !o.value || isBuiltInMacCamera(o.textContent));
+  djiHint.hidden = hasExternal || !onlyBuiltIn;
+  if (camCount === 0) {
+    hint.textContent = '找不到鏡頭。請允許瀏覽器相機權限後再按「重新掃描裝置」。';
+  } else if (hasExternal) {
+    hint.textContent = '已偵測到外接鏡頭，請從下拉選單選擇 DJI / USB 裝置。';
+  } else {
+    hint.textContent = '支援 Mac Continuity Camera、USB 鏡頭、采集卡等';
+  }
+}
+
+async function listCameras(options = {}) {
+  const { requestPermission = false, preferExternal = false } = options;
+  try {
+    if (requestPermission) await ensureCameraPermissionForEnumerate();
     const devices = await navigator.mediaDevices.enumerateDevices();
     const cams = devices.filter((d) => d.kind === 'videoinput');
+    cams.sort((a, b) => {
+      const aExt = isExternalCameraLabel(a.label);
+      const bExt = isExternalCameraLabel(b.label);
+      const aBuiltIn = isBuiltInMacCamera(a.label);
+      const bBuiltIn = isBuiltInMacCamera(b.label);
+      if (aExt && !bExt) return -1;
+      if (!aExt && bExt) return 1;
+      if (!aBuiltIn && bBuiltIn) return -1;
+      if (aBuiltIn && !bBuiltIn) return 1;
+      return (a.label || '').localeCompare(b.label || '');
+    });
     const select = $('#cam-device');
     const prev = select.value;
     select.innerHTML = '<option value="">預設鏡頭</option>';
     cams.forEach((cam, i) => {
       const opt = document.createElement('option');
       opt.value = cam.deviceId;
-      opt.textContent = cam.label || `鏡頭 ${i + 1}`;
+      const name = cam.label || `鏡頭 ${i + 1}`;
+      opt.textContent = isExternalCameraLabel(name) ? `📷 ${name}` : name;
       select.appendChild(opt);
     });
-    if (prev && [...select.options].some((o) => o.value === prev)) select.value = prev;
+    if (prev && [...select.options].some((o) => o.value === prev)) {
+      select.value = prev;
+    } else if (preferExternal) {
+      const external = [...select.options].find((o) => o.value && isExternalCameraLabel(o.textContent));
+      if (external) select.value = external.value;
+    }
     select.disabled = cams.length === 0;
+    updateCamDeviceHint(cams.length);
+    return cams;
   } catch (e) {
     console.warn('Could not list cameras', e);
+    updateCamDeviceHint(0);
+    return [];
+  }
+}
+
+async function refreshCameraDevices() {
+  await listCameras({ requestPermission: true, preferExternal: true });
+  const select = $('#cam-device');
+  const picked = select.options[select.selectedIndex];
+  if (picked?.value && isExternalCameraLabel(picked.textContent)) {
+    addLog(`已選外接鏡頭：${picked.textContent.replace(/^📷\s*/, '')}`);
+  } else {
+    addLog('已重新掃描鏡頭裝置');
   }
 }
 
 async function startLocalCamera() {
+  await ensureCameraPermissionForEnumerate();
   const deviceId = $('#cam-device').value;
-  const constraints = {
-    video: {
-      width: { ideal: 1280 },
-      height: { ideal: 720 },
-      ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'environment' }),
-    },
-    audio: false,
-  };
+  const baseVideo = deviceId
+    ? { deviceId: { exact: deviceId } }
+    : { facingMode: 'environment' };
+  const attempts = [
+    { video: { width: { ideal: 1280 }, height: { ideal: 720 }, ...baseVideo }, audio: false },
+    { video: baseVideo, audio: false },
+  ];
+  let stream;
+  let lastErr;
+  for (const constraints of attempts) {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
+      break;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  if (!stream) throw lastErr || new Error('無法連接鏡頭');
 
-  const stream = await navigator.mediaDevices.getUserMedia(constraints);
   state.cameraStream = stream;
   const video = $('#camera-feed');
   video.srcObject = stream;
   showCameraActive(true);
   applyMirror();
-  await listCameras();
-  addLog('本機鏡頭已連接');
+  await listCameras({ requestPermission: true });
+  const label = stream.getVideoTracks()[0]?.label || '本機鏡頭';
+  addLog(`本機鏡頭已連接：${label}`);
 }
 
 function destroyCameraPeer() {
+  stopSignalPolling();
   if (state.activeRemoteCall) {
     state.activeRemoteCall.close();
     state.activeRemoteCall = null;
   }
   if (state.cameraPeer) {
-    state.cameraPeer.destroy();
+    if (typeof state.cameraPeer.destroy === 'function') {
+      state.cameraPeer.destroy();
+    } else if (typeof state.cameraPeer.close === 'function') {
+      state.cameraPeer.close();
+    }
     state.cameraPeer = null;
   }
 }
 
 function isHostPeerReady() {
   return state.cameraPeer
-    && state.cameraPeer.open
-    && !state.cameraPeer.destroyed
-    && state.cameraPeer.id === hostPeerId(state.remoteRoomId);
+    && state.cameraPeer.connectionState !== 'closed'
+    && state.remoteRoomId;
 }
 
 async function ensureRemoteHostPeer() {
+  if (isLocalHost()) {
+    await updateLocalhostWarn();
+    setRemoteStatus('請改用區網 IP 開啟（見上方紅色提示）', false);
+    return;
+  }
   if (hostNeedsHttpsForRemote()) {
     await updateHostSecureWarning();
     setRemoteStatus('請改用 HTTPS 開啟主機（見上方紅色提示）', false);
@@ -1248,6 +1712,11 @@ async function ensureRemoteHostPeer() {
 }
 
 async function startRemoteCamera(retrySameRoom = false) {
+  if (isLocalHost()) {
+    await updateLocalhostWarn();
+    setRemoteStatus('請改用區網 IP 開啟（見上方紅色提示）', false);
+    return;
+  }
   if (hostNeedsHttpsForRemote()) {
     await updateHostSecureWarning();
     setRemoteStatus('請改用 HTTPS 開啟主機（見上方提示）', false);
@@ -1264,49 +1733,122 @@ async function startRemoteCamera(retrySameRoom = false) {
 
   if (isHostPeerReady()) {
     setRemoteStatus(`等待手機掃 QR（房間 ${state.remoteRoomId}）`, true);
+    pollForPhoneOffer();
     return;
   }
 
   destroyCameraPeer();
 
-  const hostId = hostPeerId(state.remoteRoomId);
   setRemoteStatus('正在就緒…');
 
-  return new Promise((resolve, reject) => {
-    state.cameraPeer = new Peer(hostId, PEER_CONFIG);
+  await signalRequest('clear', {});
 
-    state.cameraPeer.on('open', () => {
-      setRemoteStatus(`等待手機掃 QR（房間 ${state.remoteRoomId}）`, true);
-      addLog(`手機鏡頭房間 ${state.remoteRoomId} 已就緒 — 掃 QR 即可連線`);
-      resolve();
-    });
+  const pc = new RTCPeerConnection(PEER_CONFIG.config);
+  state.cameraPeer = pc;
 
-    state.cameraPeer.on('call', (call) => {
-      bindRemoteCall(call);
-    });
+  pc.ontrack = (evt) => {
+    const stream = evt.streams && evt.streams[0];
+    if (stream) attachRemoteStream(stream);
+  };
 
-    state.cameraPeer.on('disconnected', () => {
-      setRemoteStatus('Peer 已斷線，正在重連…', false);
-      state.cameraPeer.reconnect();
-    });
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'connected') {
+      setRemoteStatus('手機鏡頭已連線 ✓', true);
+    } else if (pc.connectionState === 'failed') {
+      setRemoteStatus('連線失敗，請手機按重試或產生新房間碼', false);
+    } else if (pc.connectionState === 'disconnected') {
+      setRemoteStatus('手機暫時斷線，等待恢復…', null);
+    }
+  };
 
-    state.cameraPeer.on('error', (err) => {
-      if (err.type === 'unavailable-id') {
-        setRemoteStatus('房間 ID 被佔用，2 秒後重試…', false);
-        destroyCameraPeer();
-        setTimeout(() => {
-          startRemoteCamera(true).then(resolve).catch(reject);
-        }, 2000);
-        return;
-      }
-      if (err.type === 'network' || err.type === 'server-error') {
-        setRemoteStatus('Peer 伺服器錯誤，請檢查網路', false);
-      } else {
-        setRemoteStatus('Peer 錯誤：' + (err.message || err.type), false);
-      }
-      reject(err);
-    });
-  });
+  pc.oniceconnectionstatechange = () => {
+    if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+      setRemoteStatus('手機鏡頭已連線 ✓', true);
+    }
+  };
+
+  setRemoteStatus(`等待手機掃 QR（房間 ${state.remoteRoomId}）`, true);
+  addLog(`手機鏡頭房間 ${state.remoteRoomId} 已就緒 — 本機信令等待手機`);
+  pollForPhoneOffer();
+}
+
+async function loadDjiInfo() {
+  const info = await fetch('/dji-info.json', { cache: 'no-store' }).then((r) => r.json());
+  state.djiInfo = info;
+  const urlEl = $('#dji-rtmp-url');
+  const serverEl = $('#dji-rtmp-server');
+  const statusEl = $('#dji-status');
+  if (urlEl) urlEl.textContent = info.rtmpUrl || '無法取得 IP';
+  if (serverEl) serverEl.textContent = info.rtmpServer || '—';
+  if (statusEl) {
+    statusEl.textContent = info.ok
+      ? '按「連接鏡頭」後，在 DJI Mimo 開始直播'
+      : (info.error || '需要 ffmpeg');
+    statusEl.style.color = info.ok ? '' : 'var(--red)';
+  }
+  return info;
+}
+
+function stopDjiRefresh() {
+  if (state.djiRefreshTimer) {
+    clearInterval(state.djiRefreshTimer);
+    state.djiRefreshTimer = null;
+  }
+}
+
+async function stopDjiRelay() {
+  stopDjiRefresh();
+  try {
+    await fetch('/dji/stop', { method: 'POST' });
+  } catch (_) { /* server offline */ }
+}
+
+async function startDjiCamera() {
+  const info = await loadDjiInfo();
+  if (!info.ok) {
+    alert(info.error || '請先安裝 ffmpeg：brew install ffmpeg');
+    return;
+  }
+
+  const startRes = await fetch('/dji/start', { method: 'POST' }).then((r) => r.json());
+  if (!startRes.ok) {
+    alert(startRes.message || '無法啟動 DJI 轉流');
+    return;
+  }
+
+  const img = $('#camera-feed-img');
+  const video = $('#camera-feed');
+  video.srcObject = null;
+  video.classList.remove('active');
+
+  const frameUrl = `${location.origin}${info.frameUrl}`;
+  let gotFrame = false;
+
+  function refreshFrame() {
+    img.src = `${frameUrl}?t=${Date.now()}`;
+  }
+
+  img.onload = () => {
+    gotFrame = true;
+    showCameraActive(false);
+    img.hidden = false;
+    applyMirror();
+    $('#dji-status').textContent = 'DJI 畫面已連線 ✓';
+    $('#dji-status').style.color = 'var(--blue)';
+  };
+  img.onerror = () => {
+    if (!gotFrame) {
+      $('#dji-status').textContent = '等待 DJI Mimo 開始直播…';
+      $('#dji-status').style.color = 'var(--gold)';
+    }
+  };
+
+  stopDjiRefresh();
+  refreshFrame();
+  state.djiRefreshTimer = setInterval(refreshFrame, 100);
+  state.cameraStream = { _dji: true };
+  addLog(`DJI Action/Pocket 等待 RTMP：${info.rtmpUrl}`);
+  $('#dji-status').textContent = '轉流已就緒，請在 DJI Mimo 開始直播';
 }
 
 function startUrlCamera() {
@@ -1341,6 +1883,8 @@ async function startCamera() {
     state.cameraMode = mode;
 
     if (mode === 'remote') {
+      const stay = await redirectHostToLanIfNeeded();
+      if (!stay) return;
       await prepareRemoteRoom(false);
       stopCamera(false, true);
       updateCamSourcePanels();
@@ -1353,6 +1897,8 @@ async function startCamera() {
 
     if (mode === 'local') {
       await startLocalCamera();
+    } else if (mode === 'dji') {
+      await startDjiCamera();
     } else if (mode === 'url') {
       startUrlCamera();
     }
@@ -1365,6 +1911,9 @@ async function startCamera() {
 }
 
 function stopCamera(resetUi = true, keepPeer = false) {
+  if (state.cameraStream && state.cameraStream._dji) {
+    stopDjiRelay();
+  }
   if (state.cameraStream && state.cameraStream.getTracks) {
     state.cameraStream.getTracks().forEach((t) => t.stop());
   }
@@ -1385,11 +1934,29 @@ function stopCamera(resetUi = true, keepPeer = false) {
 }
 
 function applyMirror() {
-  const mirror = $('#cam-mirror').checked;
+  const mirror = (state.cameraMode === 'remote' || state.cameraMode === 'dji')
+    ? false
+    : $('#cam-mirror').checked;
   const video = $('#camera-feed');
   const img = $('#camera-feed-img');
   video.classList.toggle('mirrored', mirror);
   if (img) img.classList.toggle('mirrored', mirror);
+}
+
+async function copyDjiRtmp() {
+  if (!state.djiInfo) await loadDjiInfo();
+  const url = state.djiInfo?.rtmpUrl;
+  if (!url) {
+    alert('無法取得 RTMP 位址');
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    $('#dji-status').textContent = 'RTMP 已複製到剪貼簿';
+    $('#dji-status').style.color = 'var(--blue)';
+  } catch (_) {
+    prompt('複製此 RTMP 到 DJI Mimo：', url);
+  }
 }
 
 async function copyRemoteLink() {
@@ -1416,8 +1983,12 @@ function switchAppView(viewId, persist = true) {
     view.classList.toggle('active', view.id === `view-${viewId}`);
   });
 
-  if (viewId === 'camera' && $('#cam-source').value === 'remote') {
-    updateCamSourcePanels();
+  if (viewId === 'camera') {
+    if ($('#cam-source').value === 'remote') {
+      updateCamSourcePanels();
+    } else if ($('#cam-source').value === 'local') {
+      listCameras({ requestPermission: true, preferExternal: false });
+    }
   }
 
   if (persist) sessionStorage.setItem(VIEW_STORAGE_KEY, viewId);
@@ -1451,7 +2022,19 @@ function init() {
   $('#btn-launch').addEventListener('click', startLaunchCountdown);
   $('#btn-relaunch').addEventListener('click', startLaunchCountdown);
   $('#btn-dismiss-victory').addEventListener('click', () => {
+    const inTournamentFlow = $('#victory-overlay').classList.contains('victory-overlay--tournament');
+    if (typeof hideVictorySchedulePanel === 'function') hideVictorySchedulePanel();
     $('#victory-overlay').hidden = true;
+    $('#btn-dismiss-victory').textContent = '繼續';
+    if (inTournamentFlow && typeof switchAppView === 'function') {
+      switchAppView('tournament');
+    }
+  });
+  $('#btn-victory-bracket')?.addEventListener('click', () => {
+    if (typeof hideVictorySchedulePanel === 'function') hideVictorySchedulePanel();
+    $('#victory-overlay').hidden = true;
+    $('#btn-dismiss-victory').textContent = '繼續';
+    if (typeof switchAppView === 'function') switchAppView('tournament');
   });
   $('#btn-clear-log').addEventListener('click', () => {
     $('#battle-log').innerHTML = '';
@@ -1461,6 +2044,7 @@ function init() {
   $('#btn-cam-stop').addEventListener('click', () => stopCamera());
   $('#cam-mirror').addEventListener('change', applyMirror);
   $('#cam-source').addEventListener('change', () => {
+    sessionStorage.setItem('cam-source-pref', $('#cam-source').value);
     updateCamSourcePanels();
     if ($('#cam-source').value === 'remote') {
       switchAppView('camera');
@@ -1469,15 +2053,22 @@ function init() {
   $('#cam-device').addEventListener('change', () => {
     if (state.cameraStream && state.cameraMode === 'local') startCamera();
   });
-  $('#btn-cam-refresh').addEventListener('click', async () => {
-    try {
-      const tmp = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-      tmp.getTracks().forEach((t) => t.stop());
-    } catch (_) { /* need permission to read labels */ }
-    await listCameras();
-    addLog('已重新掃描鏡頭裝置');
+  $('#btn-cam-refresh').addEventListener('click', () => {
+    refreshCameraDevices().catch(console.error);
   });
+
+  if (navigator.mediaDevices?.addEventListener) {
+    navigator.mediaDevices.addEventListener('devicechange', () => {
+      if ($('#cam-source').value !== 'local') return;
+      listCameras({ requestPermission: true, preferExternal: true }).then((cams) => {
+        if (cams.some((c) => isExternalCameraLabel(c.label))) {
+          addLog('偵測到新鏡頭裝置，請從下拉選單選擇');
+        }
+      });
+    });
+  }
   $('#btn-copy-remote-link').addEventListener('click', copyRemoteLink);
+  $('#btn-copy-dji-rtmp').addEventListener('click', copyDjiRtmp);
   $('#btn-new-room').addEventListener('click', async () => {
     if (state.cameraStream && !confirm('產生新房间碼會中斷現有連線，確定？')) return;
     stopCamera();
@@ -1500,9 +2091,28 @@ function init() {
   });
 
   document.addEventListener('keydown', (e) => {
+    if ((e.key === ' ' || e.code === 'Space') && launchStandbyActive && !launchPlaying) {
+      e.preventDefault();
+      startLaunchCountdownFromStandby();
+      return;
+    }
     if (e.key === 'Escape' && (cameraLaunchActive || document.body.classList.contains('launch-active'))) {
       resetLaunchTimer();
     }
+  });
+
+  document.addEventListener('fullscreenchange', () => {
+    if (document.fullscreenElement) return;
+    if (!launchFullscreenActive || !document.body.classList.contains('launch-active')) return;
+    launchFullscreenActive = false;
+    resetLaunchTimer();
+  });
+
+  $('#btn-exit-launch').addEventListener('click', () => {
+    resetLaunchTimer();
+  });
+  $('#btn-start-countdown')?.addEventListener('click', () => {
+    startLaunchCountdownFromStandby();
   });
 
   updateScoreDisplay();
@@ -1517,6 +2127,11 @@ function init() {
   initTournament();
   initAppViews();
 
+  const camPref = sessionStorage.getItem('cam-source-pref');
+  if (camPref && $('#cam-source option[value="' + camPref + '"]')) {
+    $('#cam-source').value = camPref;
+  }
+
   addLog(`歡迎來到咩咩遊樂園陀螺競賽 — ${getSessionLabel()} · ${getPhaseLabel()}`);
   addLog('官方規則：整場 Match 累積計分，先取 4 分者勝');
   addLog('得分判定：極致收尾 +3 · 擊飛／爆裂結局 +2 · 殘存結局 +1');
@@ -1527,7 +2142,7 @@ function init() {
     state.lanBaseUrl = url;
     state.phoneCamBaseUrl = await getPhoneCamBaseUrl();
   });
-  listCameras();
+  listCameras({ requestPermission: true });
 }
 
 document.addEventListener('DOMContentLoaded', init);

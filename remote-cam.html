@@ -104,16 +104,12 @@
   <video id="preview" class="hidden-preview" autoplay playsinline muted></video>
   <button id="btn-retry" class="btn" hidden disabled>重試連線</button>
   <p class="hint" id="hint">掃 QR 後會自動開啟鏡頭並連線，請允許相機權限</p>
-  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script>
     const PEER_CONFIG = {
-      debug: 0,
-      config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-        ],
-      },
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+      ],
     };
     const MAX_CALL_RETRIES = 60;
     const CALL_RETRY_MS = 1200;
@@ -128,20 +124,11 @@
     const retryBtn = document.getElementById('btn-retry');
     const connectedBadge = document.getElementById('connected-badge');
     let localStream = null;
-    let peer = null;
-    let activeCall = null;
+    let pc = null;
     let connected = false;
     let retryTimer = null;
     let dialAttempt = 0;
     let starting = false;
-
-    function isRetriablePeerError(err) {
-      const msg = String((err && err.message) || (err && err.type) || err || '');
-      return err.type === 'peer-unavailable'
-        || err.type === 'network'
-        || err.type === 'server-error'
-        || /could not connect to peer/i.test(msg);
-    }
 
     document.getElementById('room-display').textContent = room || '—';
 
@@ -160,17 +147,13 @@
     function cleanup() {
       if (retryTimer) clearTimeout(retryTimer);
       retryTimer = null;
-      if (activeCall) {
-        activeCall.close();
-        activeCall = null;
-      }
       if (localStream) {
         localStream.getTracks().forEach((t) => t.stop());
         localStream = null;
       }
-      if (peer) {
-        peer.destroy();
-        peer = null;
+      if (pc) {
+        pc.close();
+        pc = null;
       }
       connected = false;
       connectedBadge.classList.remove('show');
@@ -206,6 +189,37 @@
     }
 
     const camBlock = getCameraErrorMessage();
+
+    async function signalRequest(kind, payload) {
+      const url = `/signal/${encodeURIComponent(room)}/${kind}`;
+      if (payload) {
+        const r = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          cache: 'no-store',
+        });
+        return r.ok ? r.json() : {};
+      }
+      const r = await fetch(url, { cache: 'no-store' });
+      return r.ok ? r.json() : {};
+    }
+
+    function waitForIceGathering(peerConnection, timeout = 2500) {
+      if (peerConnection.iceGatheringState === 'complete') return Promise.resolve();
+      return new Promise((resolve) => {
+        const timer = setTimeout(done, timeout);
+        function done() {
+          clearTimeout(timer);
+          peerConnection.removeEventListener('icegatheringstatechange', onChange);
+          resolve();
+        }
+        function onChange() {
+          if (peerConnection.iceGatheringState === 'complete') done();
+        }
+        peerConnection.addEventListener('icegatheringstatechange', onChange);
+      });
+    }
 
     function onPhoneConnected() {
       if (connected) return;
@@ -251,41 +265,41 @@
         return;
       }
       setStatus(`等待主機就緒… ${attempt + 1}/${MAX_CALL_RETRIES}`, 'wait');
-      retryTimer = setTimeout(() => dialHost(attempt + 1), CALL_RETRY_MS);
+      retryTimer = setTimeout(() => sendOffer(attempt + 1), CALL_RETRY_MS);
     }
 
-    function dialHost(attempt) {
-      if (!peer || !localStream || connected) return;
-      dialAttempt = attempt;
-      if (activeCall) {
-        activeCall.close();
-        activeCall = null;
+    async function waitForAnswer(attempt) {
+      if (!pc || connected) return;
+      try {
+        const answer = await signalRequest('answer');
+        if (answer && answer.type === 'answer') {
+          await pc.setRemoteDescription(answer);
+          setStatus('已收到主機回覆，正在建立畫面…', 'wait');
+          return;
+        }
+      } catch (err) {
+        console.error(err);
       }
+      scheduleRetry(attempt);
+    }
+
+    async function sendOffer(attempt) {
+      if (!pc || !localStream || connected) return;
+      dialAttempt = attempt;
 
       if (attempt === 0) setStatus('正在連線主機…', 'wait');
       else setStatus(`等待主機就緒… ${attempt + 1}/${MAX_CALL_RETRIES}`, 'wait');
 
-      activeCall = peer.call(hostId, localStream);
-      if (!activeCall) {
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await waitForIceGathering(pc);
+        await signalRequest('offer', pc.localDescription);
+        await waitForAnswer(attempt);
+      } catch (err) {
+        console.error(err);
         scheduleRetry(attempt);
-        return;
       }
-
-      activeCall.on('error', (err) => {
-        if (!connected && isRetriablePeerError(err)) scheduleRetry(attempt);
-        else if (!connected) {
-          starting = false;
-          showRetry('連線錯誤：' + (err.message || err.type || 'unknown'));
-        }
-      });
-      activeCall.on('close', () => {
-        if (connected) {
-          connected = false;
-          starting = false;
-          showRetry('連線已關閉');
-        }
-      });
-      watchCallState(activeCall, attempt);
     }
 
     async function startConnection() {
@@ -304,26 +318,11 @@
           audio: false,
         });
         preview.srcObject = localStream;
-        preview.classList.add('mirrored');
 
-        peer = new Peer(undefined, PEER_CONFIG);
-
-        peer.on('open', () => dialHost(0));
-
-        peer.on('error', (err) => {
-          console.error(err);
-          if (!connected && isRetriablePeerError(err)) {
-            scheduleRetry(dialAttempt);
-            return;
-          }
-          starting = false;
-          showRetry('Peer 錯誤：' + (err.message || err.type));
-        });
-
-        peer.on('disconnected', () => {
-          if (!connected) setStatus('網路斷線，正在重連…', 'wait');
-          peer.reconnect();
-        });
+        pc = new RTCPeerConnection(PEER_CONFIG);
+        localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+        watchCallState({ peerConnection: pc }, 0);
+        await sendOffer(0);
       } catch (err) {
         console.error(err);
         cleanup();

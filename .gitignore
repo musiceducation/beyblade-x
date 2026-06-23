@@ -4,3 +4,6 @@ key.pem
 
 # macOS
 .DS_Store
+
+# DJI RTMP relay temp frame
+.dji-frame.jpg

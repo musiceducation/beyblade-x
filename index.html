@@ -2,7 +2,7 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>咩咩遊樂園 — Beyblade X 陀螺競賽</title>
   <script>
     (function () {
@@ -34,17 +34,22 @@
 
   <div id="launch-camera-overlay" class="launch-camera-overlay" hidden aria-hidden="true">
     <div class="launch-camera-vignette"></div>
+    <div id="launch-burst-ring" class="launch-burst-ring"></div>
+    <div id="launch-burst-ring-2" class="launch-burst-ring"></div>
     <div class="launch-anime-bg" aria-hidden="true">
       <div class="launch-halftone"></div>
       <div class="launch-impact-burst"></div>
     </div>
     <div id="launch-camera-text" class="launch-camera-text"></div>
-    <p class="launch-camera-hint">按 Esc 退出全螢幕</p>
+    <button id="btn-start-countdown" class="btn-start-countdown" type="button" hidden>開始倒數 (Space)</button>
+    <p class="launch-camera-hint">按 Esc 或右上角 ✕ 退出</p>
   </div>
 
   <button id="btn-relaunch" class="btn-relaunch" type="button" hidden>
     Three, Two, One, Go Shoot!
   </button>
+
+  <button id="btn-exit-launch" class="btn-exit-launch" type="button" hidden aria-label="退出全屏">✕ 退出</button>
 
   <header class="arena-header">
     <div class="logo-block">
@@ -95,25 +100,25 @@
         <div class="score-track" id="track-p1" aria-label="Player 1 score progress"></div>
         <p class="finish-hint">按對手陀螺的結局方式計分</p>
         <div class="finish-buttons">
-          <button class="btn-finish extreme" data-player="1" data-type="extreme">
-            <span class="finish-icon">⚡</span>
-            <span class="finish-name">極致收尾<em>Xtreme</em></span>
-            <strong>+3</strong>
-          </button>
-          <button class="btn-finish over" data-player="1" data-type="over">
-            <span class="finish-icon">⬆</span>
-            <span class="finish-name">擊飛結局<em>Over</em></span>
-            <strong>+2</strong>
+          <button class="btn-finish spin" data-player="1" data-type="spin">
+            <span class="finish-icon">🌀</span>
+            <span class="finish-name">殘存結局<em>Spin</em></span>
+            <strong>+1</strong>
           </button>
           <button class="btn-finish burst" data-player="1" data-type="burst">
             <span class="finish-icon">💥</span>
             <span class="finish-name">爆裂結局<em>Burst</em></span>
             <strong>+2</strong>
           </button>
-          <button class="btn-finish spin" data-player="1" data-type="spin">
-            <span class="finish-icon">🌀</span>
-            <span class="finish-name">殘存結局<em>Spin</em></span>
-            <strong>+1</strong>
+          <button class="btn-finish over" data-player="1" data-type="over">
+            <span class="finish-icon">⬆</span>
+            <span class="finish-name">擊飛結局<em>Over</em></span>
+            <strong>+2</strong>
+          </button>
+          <button class="btn-finish extreme" data-player="1" data-type="extreme">
+            <span class="finish-icon">⚡</span>
+            <span class="finish-name">極致收尾<em>Xtreme</em></span>
+            <strong>+3</strong>
           </button>
         </div>
       </article>
@@ -158,25 +163,25 @@
         <div class="score-track" id="track-p2" aria-label="Player 2 score progress"></div>
         <p class="finish-hint">按對手陀螺的結局方式計分</p>
         <div class="finish-buttons">
-          <button class="btn-finish extreme" data-player="2" data-type="extreme">
-            <span class="finish-icon">⚡</span>
-            <span class="finish-name">極致收尾<em>Xtreme</em></span>
-            <strong>+3</strong>
-          </button>
-          <button class="btn-finish over" data-player="2" data-type="over">
-            <span class="finish-icon">⬆</span>
-            <span class="finish-name">擊飛結局<em>Over</em></span>
-            <strong>+2</strong>
+          <button class="btn-finish spin" data-player="2" data-type="spin">
+            <span class="finish-icon">🌀</span>
+            <span class="finish-name">殘存結局<em>Spin</em></span>
+            <strong>+1</strong>
           </button>
           <button class="btn-finish burst" data-player="2" data-type="burst">
             <span class="finish-icon">💥</span>
             <span class="finish-name">爆裂結局<em>Burst</em></span>
             <strong>+2</strong>
           </button>
-          <button class="btn-finish spin" data-player="2" data-type="spin">
-            <span class="finish-icon">🌀</span>
-            <span class="finish-name">殘存結局<em>Spin</em></span>
-            <strong>+1</strong>
+          <button class="btn-finish over" data-player="2" data-type="over">
+            <span class="finish-icon">⬆</span>
+            <span class="finish-name">擊飛結局<em>Over</em></span>
+            <strong>+2</strong>
+          </button>
+          <button class="btn-finish extreme" data-player="2" data-type="extreme">
+            <span class="finish-icon">⚡</span>
+            <span class="finish-name">極致收尾<em>Xtreme</em></span>
+            <strong>+3</strong>
           </button>
         </div>
       </article>
@@ -188,6 +193,7 @@
       <div class="tournament-header">
         <h2>選手名單 · 抽籤 · 賽程表</h2>
         <div class="tournament-header-actions">
+          <span id="tournament-sync-status" class="tournament-sync-status" data-status="local" title="多部裝置同步">本機</span>
           <span id="draw-status" class="draw-badge">未抽籤</span>
           <button id="btn-draw" class="btn btn-sm btn-primary" type="button">🎲 抽籤配對</button>
           <button id="btn-reset-bracket" class="btn btn-sm btn-ghost" type="button">重設賽程</button>
@@ -225,11 +231,12 @@
             <select id="cam-source" class="cam-select cam-source-select" aria-label="鏡頭來源">
               <option value="local">本機鏡頭 / USB / 采集卡</option>
               <option value="remote">手機 / 平板（QR 連線）</option>
+              <option value="dji">DJI Action / Pocket（Mimo 直播）</option>
               <option value="url">網路鏡頭 URL</option>
             </select>
             <button id="btn-cam-start" class="btn btn-sm btn-primary" data-label-local="連接鏡頭" data-label-remote="等待手機 QR…">連接鏡頭</button>
             <button id="btn-cam-stop" class="btn btn-sm btn-ghost" disabled>停止</button>
-            <label class="toggle">
+            <label class="toggle" id="cam-mirror-wrap">
               <input type="checkbox" id="cam-mirror" checked> 鏡像
             </label>
           </div>
@@ -239,7 +246,8 @@
             <option value="">預設鏡頭</option>
           </select>
           <button id="btn-cam-refresh" class="btn btn-sm btn-ghost" type="button">重新掃描裝置</button>
-          <p class="cam-hint">支援 Mac Continuity Camera、USB 鏡頭、采集卡等</p>
+          <p class="cam-hint" id="cam-local-hint">支援 Mac Continuity Camera、USB 鏡頭、采集卡等</p>
+          <p class="cam-hint cam-hint-dji-usb" id="cam-dji-usb-hint" hidden>DJI Action / Pocket：相機內開啟「網路攝影機 / Webcam 模式」→ USB 接 Mac → 按「重新掃描裝置」。若仍無選項，可改選上方「DJI Action / Pocket（Mimo 直播）」。</p>
         </div>
         <div id="cam-remote-panel" class="cam-sub-panel" hidden>
           <div id="host-secure-warn" class="host-secure-warn" hidden></div>
@@ -261,6 +269,27 @@
             <p class="cam-hint">請執行 <code>./start.sh</code> 或 <code>python3 serve-https.py</code>，用 <strong>https://電腦IP:8443/</strong> 開啟本頁。首次須在電腦與手機瀏覽器接受憑證警告。</p>
           </details>
         </div>
+        <div id="cam-dji-panel" class="cam-sub-panel" hidden>
+          <p class="remote-quick-title">Osmo Action / Pocket → 本頁顯示</p>
+          <p class="cam-hint"><strong>方法一（推薦）</strong>：USB 接 Mac → 選「本機鏡頭 / USB」</p>
+          <p class="cam-hint"><strong>方法二</strong>：Wi‑Fi + DJI Mimo 自訂 RTMP 直播</p>
+          <p>RTMP 位址：<code id="dji-rtmp-url">—</code></p>
+          <div class="remote-actions">
+            <button id="btn-copy-dji-rtmp" class="btn btn-sm btn-ghost" type="button">複製 RTMP</button>
+          </div>
+          <p class="dji-status" id="dji-status">按「連接鏡頭」後，在 DJI Mimo 開始直播</p>
+          <details class="remote-help">
+            <summary>Mimo RTMP 設定</summary>
+            <ul class="cam-hint dji-steps">
+              <li>Action / Pocket 與 Mac 連同一 Wi‑Fi</li>
+              <li>手機開 <strong>DJI Mimo</strong> → 連接相機 → 直播 → <strong>自訂 RTMP</strong></li>
+              <li>貼上上方 RTMP，或伺服器 <code id="dji-rtmp-server">—</code> + 金鑰 <code>dji</code></li>
+              <li>本頁按「連接鏡頭」→ Mimo 按「開始直播」</li>
+              <li>需安裝 ffmpeg：<code>brew install ffmpeg</code></li>
+              <li>Pocket 3 / Action 4 以上支援 USB 網路攝影機模式，可直接用本機鏡頭</li>
+            </ul>
+          </details>
+        </div>
         <div id="cam-url-panel" class="cam-sub-panel" hidden>
           <div class="cam-url-row">
             <input id="cam-url-input" class="cam-url-input" type="url" placeholder="http://192.168.1.5:4747/video">
@@ -273,7 +302,7 @@
           <img id="camera-feed-img" alt="" hidden>
           <div class="camera-placeholder" id="camera-placeholder">
             <span class="placeholder-icon">📷</span>
-            <p>連接本機鏡頭、手機 QR、或其他裝置的網路影像</p>
+            <p>連接本機鏡頭、手機 QR、DJI Action/Pocket、或其他裝置的網路影像</p>
           </div>
           <div class="scanlines" aria-hidden="true"></div>
           <div class="rec-badge" id="rec-badge" hidden>
@@ -296,11 +325,17 @@
 
   <!-- Victory overlay -->
   <div id="victory-overlay" class="victory-overlay" hidden>
-    <div class="victory-content">
-      <p class="victory-label">勝 者</p>
-      <h2 id="victory-name">Blader 1</h2>
-      <p id="victory-detail" class="victory-detail">對戰完成</p>
-      <button id="btn-dismiss-victory" class="btn btn-primary">繼續</button>
+    <div class="victory-overlay-inner">
+      <div class="victory-content">
+        <p class="victory-label">勝 者</p>
+        <h2 id="victory-name">Blader 1</h2>
+        <p id="victory-detail" class="victory-detail">對戰完成</p>
+        <div class="victory-actions">
+          <button id="btn-dismiss-victory" class="btn btn-primary">繼續</button>
+          <button id="btn-victory-bracket" class="btn btn-ghost" type="button" hidden>查看完整賽程</button>
+        </div>
+      </div>
+      <aside id="victory-schedule-panel" class="victory-schedule-panel" hidden aria-label="下一場賽事"></aside>
     </div>
   </div>
 
@@ -309,7 +344,6 @@
     <span id="toast-text"></span>
   </div>
 
-  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="tournament.js"></script>
   <script src="app.js"></script>
 </body>
