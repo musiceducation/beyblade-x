@@ -324,10 +324,13 @@ function showLaunchStandbyHint() {
   }
   if (hint) {
     hint.textContent = touch
-      ? '點「開始倒數」或 Three, Two, One, Go Shoot! · Esc 退出'
-      : '按 Space 開始 Three, Two, One, Go Shoot! · Esc 退出';
+      ? '點下方「開始倒數」或點擊畫面 · ✕ 退出'
+      : '按 Space 或點「開始倒數」· Esc 退出';
   }
-  if (startBtn) startBtn.hidden = !touch;
+  if (startBtn) {
+    startBtn.hidden = false;
+    startBtn.textContent = touch ? '開始倒數' : '開始倒數 (Space)';
+  }
 
   const timerEl = $('#launch-timer');
   if (timerEl) {
@@ -393,6 +396,10 @@ async function startLaunchCountdownFromStandby() {
   if (launchPlaying || launchTimers.length || launchRaf) return;
   launchStandbyActive = false;
   await runLaunchCountdownSequence();
+}
+
+function handleLaunchStandbyStart() {
+  startLaunchCountdownFromStandby();
 }
 
 async function enterBrowserFullscreen() {
@@ -2111,9 +2118,18 @@ function init() {
   $('#btn-exit-launch').addEventListener('click', () => {
     resetLaunchTimer();
   });
-  $('#btn-start-countdown')?.addEventListener('click', () => {
-    startLaunchCountdownFromStandby();
+  $('#btn-start-countdown')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    handleLaunchStandbyStart();
   });
+  const launchOverlay = $('#launch-camera-overlay');
+  if (launchOverlay) {
+    launchOverlay.addEventListener('click', (e) => {
+      if (!document.body.classList.contains('launch-standby')) return;
+      if (e.target.closest('#btn-start-countdown')) return;
+      handleLaunchStandbyStart();
+    });
+  }
 
   updateScoreDisplay();
   $('#session-select').addEventListener('change', () => {
