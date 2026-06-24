@@ -1,0 +1,8 @@
+# Local RTMP ingest for DJI Mimo → ffmpeg frame grab (managed by serve-https.py)
+logLevel: warn
+rtmp: yes
+rtmpAddress: :1935
+rtsp: yes
+rtspAddress: :8554
+paths:
+  live/dji:

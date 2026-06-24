@@ -65,7 +65,6 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
 const scoreEls = [$('#score-p1'), $('#score-p2')];
-const trackEls = [];
 const nameEls = [$('#name-p1'), $('#name-p2')];
 const playerCards = [$('.player-red'), $('.player-blue')];
 
@@ -124,10 +123,9 @@ function renderScoreTrack(container, score) {
 }
 
 function updateScoreTracks() {
-  trackEls.forEach((container, i) => {
-    renderScoreTrack(container, state.scores[i]);
+  for (let i = 0; i < 2; i++) {
     renderScoreTrack($(`#broadcast-rail-p${i + 1}`), state.scores[i]);
-  });
+  }
 }
 
 function addLog(message, team = 'system', opts = {}) {
@@ -2024,18 +2022,74 @@ async function startRemoteCamera(retrySameRoom = false) {
   pollForPhoneOffer();
 }
 
+const DJI_RTMP_PORT = 1935;
+const DJI_STREAM_KEY = 'dji';
+
+function buildDjiRtmpUrls(ip) {
+  if (!ip) return { rtmpUrl: null, rtmpServer: null };
+  const server = `rtmp://${ip}:${DJI_RTMP_PORT}/live/`;
+  return { rtmpUrl: `${server}${DJI_STREAM_KEY}`, rtmpServer: server };
+}
+
+function arenaServerConnectHint() {
+  const { protocol, port } = location;
+  if (protocol === 'file:') {
+    return '請執行 ./start.sh，用 https://localhost:8443/ 開啟（唔好直接開 HTML 檔）';
+  }
+  if (port && port !== '8443') {
+    return `你而家用緊 :${port}（Live Server 等），請改開 https://localhost:8443/`;
+  }
+  return '無法連接伺服器 — 請在終端執行 ./start.sh';
+}
+
 async function loadDjiInfo() {
-  const info = await fetch('/dji-info.json', { cache: 'no-store' }).then((r) => r.json());
-  state.djiInfo = info;
   const urlEl = $('#dji-rtmp-url');
   const serverEl = $('#dji-rtmp-server');
   const statusEl = $('#dji-status');
+  if (urlEl) urlEl.textContent = '載入中…';
+  if (serverEl) serverEl.textContent = '載入中…';
+
+  let info = null;
+  let fromServer = false;
+  try {
+    const r = await fetch('/dji-info.json', { cache: 'no-store' });
+    if (r.ok) {
+      info = await r.json();
+      fromServer = true;
+    }
+  } catch (_) { /* server offline or not serve-https.py */ }
+
+  if (!fromServer) {
+    const ip = await detectLocalIp();
+    const urls = buildDjiRtmpUrls(ip);
+    info = {
+      ok: false,
+      ip,
+      streamKey: DJI_STREAM_KEY,
+      frameUrl: '/dji-frame.jpg',
+      ffmpeg: null,
+      relayRunning: false,
+      rtmpUrl: urls.rtmpUrl,
+      rtmpServer: urls.rtmpServer,
+      error: !ip
+        ? '無法取得本機 IP — 請用 https://電腦IP:8443/ 開啟'
+        : arenaServerConnectHint(),
+    };
+  } else if (!info.rtmpUrl) {
+    const ip = info.ip || (await detectLocalIp());
+    const urls = buildDjiRtmpUrls(ip);
+    info = { ...info, ip, rtmpUrl: urls.rtmpUrl, rtmpServer: urls.rtmpServer };
+  }
+
+  state.djiInfo = info;
   if (urlEl) urlEl.textContent = info.rtmpUrl || '無法取得 IP';
   if (serverEl) serverEl.textContent = info.rtmpServer || '—';
+  const urlInline = $('#dji-rtmp-url-inline');
+  if (urlInline) urlInline.textContent = info.rtmpUrl || '—';
   if (statusEl) {
     statusEl.textContent = info.ok
       ? '按「連接鏡頭」後，在 DJI Mimo 開始直播'
-      : (info.error || '需要 ffmpeg');
+      : (info.error || '需要 ffmpeg：brew install ffmpeg');
     statusEl.style.color = info.ok ? '' : 'var(--red)';
   }
   return info;
@@ -2090,14 +2144,19 @@ async function startDjiCamera() {
   };
   img.onerror = () => {
     if (!gotFrame) {
-      $('#dji-status').textContent = '等待 DJI Mimo 開始直播…';
+      const ip = state.djiInfo?.ip || '';
+      $('#dji-status').innerHTML = [
+        '等待 DJI Mimo 開始直播…',
+        ip ? `Mimo 填 <strong>rtmp://${ip}:1935/live/</strong> + 金鑰 <strong>dji</strong>` : '',
+        '若顯示「直播間異常」：手機同 Mac 同一 Wi‑Fi、關 VPN，並允許 Mac 防火牆接收連線',
+      ].filter(Boolean).join('<br>');
       $('#dji-status').style.color = 'var(--gold)';
     }
   };
 
   stopDjiRefresh();
   refreshFrame();
-  state.djiRefreshTimer = setInterval(refreshFrame, 100);
+  state.djiRefreshTimer = setInterval(refreshFrame, 33);
   state.cameraStream = { _dji: true };
   addLog(`DJI Action/Pocket 等待 RTMP：${info.rtmpUrl}`);
   $('#dji-status').textContent = '轉流已就緒，請在 DJI Mimo 開始直播';
@@ -2248,11 +2307,7 @@ function switchAppView(viewId, persist = true) {
   });
 
   if (viewId === 'camera') {
-    if ($('#cam-source').value === 'remote') {
-      updateCamSourcePanels();
-    } else if ($('#cam-source').value === 'local') {
-      listCameras({ requestPermission: true, preferExternal: false });
-    }
+    updateCamSourcePanels();
   }
 
   if (viewId === 'tournament') {

@@ -17,9 +17,14 @@ DIR = os.path.dirname(os.path.abspath(__file__))
 PORT = 8443
 RTMP_PORT = 1935
 DJI_STREAM_KEY = 'dji'
+DJI_WIDTH = 1920
+DJI_FPS = 30
+DJI_JPEG_Q = 2  # 1 = best, 31 = worst
 CERT = os.path.join(DIR, 'cert.pem')
 KEY = os.path.join(DIR, 'key.pem')
 DJI_FRAME = os.path.join(DIR, '.dji-frame.jpg')
+DJI_FFMPEG_LOG = os.path.join(DIR, '.dji-ffmpeg.log')
+MEDIAMTX_CONFIG = os.path.join(DIR, 'mediamtx.yml')
 REPLAY_DIR = os.path.join(DIR, '.replays')
 REPLAY_INDEX = os.path.join(REPLAY_DIR, 'index.json')
 REPLAY_MAX = 60
@@ -168,27 +173,129 @@ def parse_replay_id_from_path(path):
     return match.group(1) if match else None
 
 
-def find_ffmpeg():
-    """Resolve ffmpeg binary (PATH or common Homebrew locations)."""
-    found = shutil.which('ffmpeg')
+def find_binary(name, brew_paths=()):
+    found = shutil.which(name)
     if found:
         return found
-    for candidate in (
-        '/opt/homebrew/bin/ffmpeg',
-        '/usr/local/bin/ffmpeg',
-    ):
+    for candidate in brew_paths:
         if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
     return None
 
 
+def find_ffmpeg():
+    """Resolve ffmpeg binary (PATH or common Homebrew locations)."""
+    return find_binary('ffmpeg', (
+        '/opt/homebrew/bin/ffmpeg',
+        '/usr/local/bin/ffmpeg',
+    ))
+
+
+def find_mediamtx():
+    return find_binary('mediamtx', (
+        '/opt/homebrew/bin/mediamtx',
+        '/usr/local/bin/mediamtx',
+    ))
+
+
+def free_rtmp_port():
+    """Stop leftover mediamtx from a prior session so ffmpeg -listen can bind :1935."""
+    try:
+        out = subprocess.check_output(
+            ['lsof', '-ti', f'tcp:{RTMP_PORT}'],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return
+    for pid in out.splitlines():
+        try:
+            os.kill(int(pid), 15)
+        except (OSError, ValueError):
+            pass
+    time.sleep(0.2)
+
+
 class DjiRelay:
     def __init__(self):
+        self.mtx_proc = None
         self.proc = None
+        self.watch_thread = None
         self.lock = threading.Lock()
 
     def running(self):
-        return self.proc is not None and self.proc.poll() is None
+        mtx = self.mtx_proc is not None and self.mtx_proc.poll() is None
+        reader = self.proc is not None and self.proc.poll() is None
+        if mtx:
+            return True
+        return reader
+
+    def _wait_for_rtmp_port(self, timeout=5.0):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                with socket.create_connection(('127.0.0.1', RTMP_PORT), timeout=0.25):
+                    return True
+            except OSError:
+                time.sleep(0.15)
+        return False
+
+    def _kill_reader(self):
+        if not self.proc:
+            return
+        self.proc.terminate()
+        try:
+            self.proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+        self.proc = None
+
+    def _spawn_reader(self, ffmpeg):
+        self._kill_reader()
+        log_file = open(DJI_FFMPEG_LOG, 'a', encoding='utf-8')
+        log_file.write(f'\n--- DJI relay start {time.strftime("%Y-%m-%d %H:%M:%S")} ---\n')
+        log_file.flush()
+        use_mediamtx = self.mtx_proc is not None and self.mtx_proc.poll() is None
+        if use_mediamtx and not self._wait_for_rtmp_port(timeout=8.0):
+            log_file.write('mediamtx port not ready\n')
+            log_file.flush()
+            log_file.close()
+            self.mtx_proc = None
+            use_mediamtx = False
+
+        input_url = f'rtmp://0.0.0.0:{RTMP_PORT}/live/{DJI_STREAM_KEY}'
+        input_opts = ['-listen', '1'] if not use_mediamtx else []
+        if use_mediamtx:
+            input_url = f'rtmp://127.0.0.1:{RTMP_PORT}/live/{DJI_STREAM_KEY}'
+        cmd = [ffmpeg, '-hide_banner', '-loglevel', 'warning', *input_opts, '-i', input_url]
+        cmd += [
+            '-an', '-vf', f'fps={DJI_FPS},scale={DJI_WIDTH}:-2',
+            '-q:v', str(DJI_JPEG_Q),
+            '-f', 'image2', '-update', '1', '-y', DJI_FRAME,
+        ]
+        self.proc = subprocess.Popen(cmd, cwd=DIR, stderr=log_file)
+
+    def _watch_reader(self):
+        while True:
+            with self.lock:
+                if self.mtx_proc is None or self.mtx_proc.poll() is not None:
+                    return
+                proc = self.proc
+            if proc is None:
+                time.sleep(1.5)
+                continue
+            proc.wait()
+            with self.lock:
+                if self.mtx_proc is None or self.mtx_proc.poll() is not None:
+                    return
+                ffmpeg = find_ffmpeg()
+                if not ffmpeg:
+                    return
+                try:
+                    self._spawn_reader(ffmpeg)
+                except OSError:
+                    return
+            time.sleep(1.5)
 
     def start(self):
         with self.lock:
@@ -197,27 +304,38 @@ class DjiRelay:
                 return False, '請安裝 ffmpeg：brew install ffmpeg'
             if self.running():
                 return True, 'already running'
+
+            self.stop_unlocked()
+
             if os.path.isfile(DJI_FRAME):
                 os.remove(DJI_FRAME)
-            self.proc = subprocess.Popen([
-                ffmpeg, '-hide_banner', '-loglevel', 'warning',
-                '-listen', '1', '-i', f'rtmp://0.0.0.0:{RTMP_PORT}/live/{DJI_STREAM_KEY}',
-                '-an', '-vf', 'fps=15,scale=1280:-2',
-                '-f', 'image2', '-update', '1', '-y', DJI_FRAME,
-            ], cwd=DIR)
+
+            free_rtmp_port()
+
+            # ffmpeg -listen waits for Mimo; mediamtx + RTMP pull retries were flaky on ffmpeg 8.
+            try:
+                self._spawn_reader(ffmpeg)
+            except OSError as exc:
+                self.stop_unlocked()
+                return False, str(exc)
+
             return True, 'waiting'
+
+    def stop_unlocked(self):
+        self._kill_reader()
+        if self.mtx_proc:
+            self.mtx_proc.terminate()
+            try:
+                self.mtx_proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.mtx_proc.kill()
+            self.mtx_proc = None
+        if os.path.isfile(DJI_FRAME):
+            os.remove(DJI_FRAME)
 
     def stop(self):
         with self.lock:
-            if self.proc:
-                self.proc.terminate()
-                try:
-                    self.proc.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    self.proc.kill()
-                self.proc = None
-            if os.path.isfile(DJI_FRAME):
-                os.remove(DJI_FRAME)
+            self.stop_unlocked()
 
 
 DJI_RELAY = DjiRelay()
@@ -353,10 +471,11 @@ class ArenaHandler(http.server.SimpleHTTPRequestHandler):
                 'ok': has_ffmpeg,
                 'ip': ip,
                 'rtmpUrl': f'rtmp://{ip}:{RTMP_PORT}/live/{DJI_STREAM_KEY}' if ip else None,
-                'rtmpServer': f'rtmp://{ip}:{RTMP_PORT}/live' if ip else None,
+                'rtmpServer': f'rtmp://{ip}:{RTMP_PORT}/live/' if ip else None,
                 'streamKey': DJI_STREAM_KEY,
                 'frameUrl': '/dji-frame.jpg',
                 'ffmpeg': has_ffmpeg,
+                'rtmpBackend': 'ffmpeg',
                 'relayRunning': DJI_RELAY.running(),
                 'error': None if has_ffmpeg else '請安裝 ffmpeg：brew install ffmpeg',
             })
