@@ -65,7 +65,7 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
 const scoreEls = [$('#score-p1'), $('#score-p2')];
-const trackEls = [$('#track-p1'), $('#track-p2')];
+const trackEls = [];
 const nameEls = [$('#name-p1'), $('#name-p2')];
 const playerCards = [$('.player-red'), $('.player-blue')];
 
@@ -77,6 +77,13 @@ function finishTooltip(type) {
   return `${f.zh} ${f.en} — ${FINISH_DESCRIPTIONS[type]} (+${pts})`;
 }
 
+const FINISH_SHORT = {
+  spin: '殘存',
+  burst: '爆裂',
+  over: '擊飛',
+  extreme: '極致',
+};
+
 function syncFinishButtons() {
   $$('.btn-finish').forEach((btn) => {
     const type = btn.dataset.type;
@@ -84,9 +91,7 @@ function syncFinishButtons() {
     if (!f) return;
     btn.title = finishTooltip(type);
     const nameEl = btn.querySelector('.finish-name');
-    if (nameEl) {
-      nameEl.innerHTML = `${f.zh}<em>${f.en.replace(' Finish', '')}</em>`;
-    }
+    if (nameEl) nameEl.textContent = FINISH_SHORT[type] || f.zh;
     const ptsEl = btn.querySelector('strong');
     if (ptsEl) ptsEl.textContent = `+${FINISH_POINTS[type]}`;
   });
@@ -423,6 +428,7 @@ function showLaunchStandbyHint() {
 
   const timerEl = $('#launch-timer');
   if (timerEl) {
+    timerEl.hidden = true;
     timerEl.textContent = 'Ready';
     timerEl.classList.remove('counting', 'go-shoot');
   }
@@ -934,6 +940,7 @@ function resetLaunchTimer(exitFullscreen = true) {
     }
   }
   const el = $('#launch-timer');
+  el.hidden = true;
   el.textContent = 'Ready';
   el.classList.remove('counting', 'go-shoot');
   $('#btn-launch').disabled = false;
@@ -1525,6 +1532,25 @@ function updateRemoteQrDisplay() {
       `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(state.remoteLink)}`;
   }
   updateRemoteCamButtons();
+}
+
+async function updatePlayerQrDisplay() {
+  const linkEl = $('#player-qr-link');
+  const qrImg = $('#player-qr');
+  if (!linkEl) return;
+
+  const cloudUrl = typeof getPlayerPortalUrl === 'function' ? getPlayerPortalUrl() : null;
+  const base = cloudUrl || await getLanBaseUrl();
+  const url = cloudUrl || `${base}player.html`;
+  linkEl.textContent = url;
+
+  if (qrImg && url && !url.includes('localhost') && !url.includes('127.0.0.1') && !url.includes('your-cloud-player')) {
+    qrImg.hidden = false;
+    qrImg.src =
+      `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(url)}`;
+  } else if (qrImg) {
+    qrImg.hidden = true;
+  }
 }
 
 function updateRemoteCamButtons() {
@@ -2195,6 +2221,18 @@ async function copyRemoteLink() {
   }
 }
 
+async function copyPlayerLink() {
+  const cloudUrl = typeof getPlayerPortalUrl === 'function' ? getPlayerPortalUrl() : null;
+  const base = await getLanBaseUrl();
+  const url = cloudUrl || `${base}player.html`;
+  try {
+    await navigator.clipboard.writeText(url);
+    if (typeof showToast === 'function') showToast('選手查閱連結已複製');
+  } catch (_) {
+    prompt('複製此連結給選手：', url);
+  }
+}
+
 // ─── App views (tabs) ──────────────────────────────────────
 
 const VIEW_STORAGE_KEY = 'bex-app-view';
@@ -2215,6 +2253,10 @@ function switchAppView(viewId, persist = true) {
     } else if ($('#cam-source').value === 'local') {
       listCameras({ requestPermission: true, preferExternal: false });
     }
+  }
+
+  if (viewId === 'tournament') {
+    updatePlayerQrDisplay().catch(console.error);
   }
 
   if (persist) sessionStorage.setItem(VIEW_STORAGE_KEY, viewId);
@@ -2372,6 +2414,9 @@ function init() {
   initTournament();
   initReplay();
   initAppViews();
+  if (typeof initSupabaseSync === 'function') initSupabaseSync();
+  $('#btn-copy-player-link')?.addEventListener('click', () => { copyPlayerLink().catch(console.error); });
+  updatePlayerQrDisplay().catch(console.error);
 
   const camPref = sessionStorage.getItem('cam-source-pref');
   if (camPref && $('#cam-source option[value="' + camPref + '"]')) {

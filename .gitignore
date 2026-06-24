@@ -7,3 +7,9 @@ key.pem
 
 # DJI RTMP relay temp frame
 .dji-frame.jpg
+
+# Server-side replay uploads
+.replays/
+
+# Supabase host credentials (copy from arena-config.example.js)
+arena-config.local.js

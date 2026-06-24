@@ -131,6 +131,11 @@ async function pushTournamentState() {
     if (res.ok && data.ok) {
       tournamentSync.revision = data.revision;
       updateSyncIndicator('synced');
+      if (typeof pushTournamentPayloadToSupabase === 'function') {
+        const payload = buildFullSyncPayload();
+        payload.revision = data.revision;
+        pushTournamentPayloadToSupabase(payload).catch(console.error);
+      }
       return;
     }
     if (res.status === 409 && data.revision) {
@@ -222,6 +227,9 @@ function persistSession(options = {}) {
   saveTournamentStorage(all);
   if (!skipPush && tournamentSync.enabled && !tournamentSync.applyingRemote) {
     pushTournamentState();
+  }
+  if (!skipPush && typeof scheduleCloudTournamentPush === 'function') {
+    scheduleCloudTournamentPush();
   }
 }
 

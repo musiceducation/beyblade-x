@@ -21,7 +21,110 @@ const replayState = {
   activeMatchGroupId: null,
   db: null,
   finalizeChain: Promise.resolve(),
+  serverUploadPending: 0,
 };
+
+function updateReplaySyncStatus() {
+  const el = $('#replay-sync-status');
+  if (!el) return;
+  const pendingLan = replayState.replays.filter((r) => r.serverSynced === false).length;
+  const pendingCloud = typeof isSupabaseSyncEnabled === 'function' && isSupabaseSyncEnabled()
+    ? replayState.replays.filter((r) => r.cloudSynced === false).length
+    : 0;
+  const uploading = replayState.serverUploadPending;
+  if (uploading > 0) {
+    el.textContent = `上傳中 ${uploading}`;
+    el.dataset.status = 'syncing';
+  } else if (pendingLan > 0 || pendingCloud > 0) {
+    const parts = [];
+    if (pendingLan) parts.push(`LAN ${pendingLan}`);
+    if (pendingCloud) parts.push(`雲 ${pendingCloud}`);
+    el.textContent = `待上傳 ${parts.join(' · ')}`;
+    el.dataset.status = 'pending';
+  } else if (replayState.replays.length) {
+    el.textContent = typeof isSupabaseSyncEnabled === 'function' && isSupabaseSyncEnabled()
+      ? '已同步 (LAN+雲)'
+      : '已同步';
+    el.dataset.status = 'synced';
+  } else {
+    el.textContent = '';
+    el.dataset.status = 'idle';
+  }
+}
+
+async function uploadReplayMetadata(session) {
+  const r = await fetch('/replay/upload.json', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(session),
+  });
+  if (!r.ok) throw new Error(`metadata ${r.status}`);
+  return r.json();
+}
+
+async function uploadReplayVideoBlob(replayId, blob) {
+  const r = await fetch(`/replay/${replayId}/video`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'video/webm' },
+    body: blob,
+  });
+  if (!r.ok) throw new Error(`video ${r.status}`);
+  return r.json();
+}
+
+async function uploadReplayToServer(session, blob, attempt = 0) {
+  const maxAttempts = 3;
+  replayState.serverUploadPending += 1;
+  updateReplaySyncStatus();
+  try {
+    await uploadReplayMetadata(session);
+    if (blob && session.videoId) {
+      await uploadReplayVideoBlob(session.id, blob);
+    }
+    session.serverSynced = true;
+    session.serverSyncError = null;
+    saveReplayList();
+    if (typeof uploadReplayToSupabase === 'function' && isSupabaseSyncEnabled()) {
+      await uploadReplayToSupabase(session, blob);
+      saveReplayList();
+    }
+  } catch (err) {
+    if (attempt < maxAttempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
+      replayState.serverUploadPending -= 1;
+      return uploadReplayToServer(session, blob, attempt + 1);
+    }
+    session.serverSynced = false;
+    session.serverSyncError = String(err.message || err);
+    saveReplayList();
+    console.warn('Replay server upload failed', err);
+  } finally {
+    replayState.serverUploadPending = Math.max(0, replayState.serverUploadPending - 1);
+    updateReplaySyncStatus();
+    renderReplayList();
+  }
+}
+
+async function retryPendingReplayUploads() {
+  const pending = replayState.replays.filter((r) => r.serverSynced !== true || r.cloudSynced !== true);
+  for (const replay of pending) {
+    let blob = null;
+    if (replay.videoId) {
+      try {
+        blob = await getReplayVideo(replay.videoId);
+      } catch (_) { /* no local video */ }
+    }
+    if (replay.serverSynced !== true) {
+      uploadReplayToServer(replay, blob).catch(console.error);
+    } else if (typeof uploadReplayToSupabase === 'function' && isSupabaseSyncEnabled() && replay.cloudSynced !== true) {
+      uploadReplayToSupabase(replay, blob).then(() => {
+        saveReplayList();
+        updateReplaySyncStatus();
+        renderReplayList();
+      }).catch(console.error);
+    }
+  }
+}
 
 function replayId() {
   return `r-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -348,6 +451,11 @@ async function finalizeReplaySession(session, finalScores, options = {}) {
   }
   saveReplayList();
   renderReplayList();
+  if (session.serverSynced !== true) {
+    session.serverSynced = false;
+    session.cloudSynced = false;
+    uploadReplayToServer(session, blob).catch(console.error);
+  }
 }
 
 function discardReplaySession() {
@@ -465,15 +573,18 @@ function renderReplayEvents(replay) {
 
 function updateReplayCountBadge() {
   const badge = $('#replay-count');
+  const syncEl = $('#replay-sync-status');
   if (!badge) return;
   const count = replayState.replays.length;
   if (!count) {
     badge.hidden = true;
     badge.textContent = '';
+    if (syncEl) syncEl.hidden = true;
     return;
   }
   badge.hidden = false;
   badge.textContent = `${count} 局`;
+  if (syncEl) syncEl.hidden = false;
 }
 
 function getMatchRounds(replay) {
@@ -983,6 +1094,8 @@ async function clearAllReplays() {
 function initReplay() {
   loadReplayList();
   renderReplayList();
+  updateReplaySyncStatus();
+  retryPendingReplayUploads();
 
   $('#replay-list')?.addEventListener('click', (e) => {
     const playMatchBtn = e.target.closest('.btn-replay-match-play');

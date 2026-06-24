@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>咩咩遊樂園 — 選手查閱</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=Orbitron:wght@700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="player.css">
+</head>
+<body>
+  <header class="player-header">
+    <div class="player-header-top">
+      <h1>咩咩遊樂園</h1>
+      <span id="player-sync-dot" class="player-sync-dot" data-status="connecting" title="連線狀態"></span>
+    </div>
+    <p class="player-subtitle">賽程 · 比分 · 回放</p>
+    <div class="player-toolbar">
+      <select id="player-session" class="player-select" aria-label="場次">
+        <option value="junior">第一場 低齡組</option>
+        <option value="senior">第二場 高齡組</option>
+      </select>
+      <input id="player-search" type="search" class="player-search" placeholder="搜尋選手名字…" autocomplete="off">
+    </div>
+  </header>
+
+  <nav class="player-tabs" aria-label="查閱分頁">
+    <button type="button" class="player-tab active" data-tab="live">即時</button>
+    <button type="button" class="player-tab" data-tab="schedule">賽程</button>
+    <button type="button" class="player-tab" data-tab="replay">回放</button>
+  </nav>
+
+  <main class="player-main">
+    <section id="tab-live" class="player-section active" aria-label="即時比分">
+      <div id="live-active" class="live-active-card" hidden>
+        <p class="live-label">進行中</p>
+        <h2 id="live-match-title" class="live-match-title"></h2>
+        <div class="live-scores">
+          <div class="live-player live-red">
+            <span id="live-p1-name" class="live-name"></span>
+            <strong id="live-p1-score" class="live-score">0</strong>
+          </div>
+          <span class="live-vs">VS</span>
+          <div class="live-player live-blue">
+            <span id="live-p2-name" class="live-name"></span>
+            <strong id="live-p2-score" class="live-score">0</strong>
+          </div>
+        </div>
+        <p id="live-battle" class="live-battle"></p>
+      </div>
+      <p id="live-empty" class="player-empty">目前沒有進行中的對戰</p>
+      <div id="live-next" class="live-next" hidden></div>
+    </section>
+
+    <section id="tab-schedule" class="player-section" hidden aria-label="賽程表">
+      <div id="schedule-progress" class="schedule-progress"></div>
+      <div id="schedule-list" class="schedule-list"></div>
+      <p id="schedule-empty" class="player-empty" hidden>尚未抽籤或建立賽程</p>
+    </section>
+
+    <section id="tab-replay" class="player-section" hidden aria-label="戰鬥回放">
+      <div id="replay-list" class="player-replay-list"></div>
+      <p id="replay-empty" class="player-empty">尚無回放</p>
+      <div id="replay-player" class="player-replay-player" hidden>
+        <video id="replay-video" class="player-replay-video" controls playsinline></video>
+        <p id="replay-player-title" class="player-replay-title"></p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="player-footer">
+    <p>請連接場內 Wi‑Fi · 首次需信任 HTTPS 憑證</p>
+  </footer>
+
+  <script src="player.js"></script>
+</body>
+</html>

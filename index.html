@@ -46,7 +46,7 @@
   </div>
 
   <button id="btn-relaunch" class="btn-relaunch" type="button" hidden>
-    Three, Two, One, Go Shoot!
+    321 · Go Shoot!
   </button>
 
   <button id="btn-exit-launch" class="btn-exit-launch" type="button" hidden aria-label="退出全屏">✕ 退出</button>
@@ -94,33 +94,30 @@
       <article class="player-card player-red" data-player="1">
         <div class="player-header">
           <input type="text" id="name-p1" class="player-name" value="Blader 1" maxlength="16" aria-label="Player 1 name">
-          <span class="player-badge">RED</span>
         </div>
         <div class="score-display">
           <span id="score-p1" class="score-num">0</span>
-          <span class="score-label">/ 4 分</span>
+          <span class="score-label" aria-hidden="true"></span>
         </div>
-        <div class="score-track" id="track-p1" aria-label="Player 1 score progress"></div>
-        <p class="finish-hint">按對手陀螺的結局方式計分</p>
         <div class="finish-buttons">
           <button class="btn-finish spin" data-player="1" data-type="spin">
             <span class="finish-icon">🌀</span>
-            <span class="finish-name">殘存結局<em>Spin</em></span>
+            <span class="finish-name">殘存</span>
             <strong>+1</strong>
           </button>
           <button class="btn-finish burst" data-player="1" data-type="burst">
             <span class="finish-icon">💥</span>
-            <span class="finish-name">爆裂結局<em>Burst</em></span>
+            <span class="finish-name">爆裂</span>
             <strong>+2</strong>
           </button>
           <button class="btn-finish over" data-player="1" data-type="over">
             <span class="finish-icon">⬆</span>
-            <span class="finish-name">擊飛結局<em>Over</em></span>
+            <span class="finish-name">擊飛</span>
             <strong>+2</strong>
           </button>
           <button class="btn-finish extreme" data-player="1" data-type="extreme">
             <span class="finish-icon">⚡</span>
-            <span class="finish-name">極致收尾<em>Xtreme</em></span>
+            <span class="finish-name">極致</span>
             <strong>+3</strong>
           </button>
         </div>
@@ -128,62 +125,56 @@
 
       <div class="vs-center">
         <div class="match-info">
-          <span class="match-label">第幾局對戰</span>
-          <span id="battle-num" class="round-num">1</span>
+          <span class="match-label">第 <span id="battle-num" class="round-num">1</span> 局</span>
+          <span class="match-target">4 分制</span>
         </div>
-        <div class="vs-badge">VS</div>
-        <p class="rules-note">官方 4 分制 · 整場 Match 累積計分<br>先取 4 分者勝</p>
         <details class="finish-rules">
           <summary>得分判定</summary>
           <ul>
-            <li><strong>極致收尾 Xtreme Finish</strong> +3 — 擊入極限區域洞口</li>
-            <li><strong>擊飛結局 Over Finish</strong> +2 — 打出場外（擊飛區域）</li>
-            <li><strong>爆裂結局 Burst Finish</strong> +2 — 對手陀螺解體</li>
-            <li><strong>殘存結局 Spin Finish</strong> +1 — 對手先停轉，己方續轉勝</li>
+            <li><strong>極致收尾</strong> +3 — 擊入極限區域洞口</li>
+            <li><strong>擊飛結局</strong> +2 — 打出場外</li>
+            <li><strong>爆裂結局</strong> +2 — 對手陀螺解體</li>
+            <li><strong>殘存結局</strong> +1 — 對手先停轉</li>
           </ul>
         </details>
         <div class="timer-block">
-          <span id="launch-timer" class="launch-timer">Ready</span>
-          <p class="launch-hint">國際對決口令</p>
-          <button id="btn-launch" class="btn btn-launch">Three, Two, One, Go Shoot!</button>
+          <span id="launch-timer" class="launch-timer" hidden>Ready</span>
+          <button id="btn-launch" class="btn btn-launch">Go Shoot 倒數</button>
           <label class="toggle voice-toggle">
-            <input type="checkbox" id="voice-countdown" checked> Shu 倒數音效
+            <input type="checkbox" id="voice-countdown" checked> Shu 音效
           </label>
         </div>
         <audio id="go-shoot-audio" preload="auto" src="beyblade-burst-sparking--shu-321-go-shoot.mp3"></audio>
-        <button id="btn-next-battle" class="btn btn-primary">下一局對戰</button>
+        <button id="btn-next-battle" class="btn btn-ghost btn-sm">下一局</button>
       </div>
 
       <article class="player-card player-blue" data-player="2">
         <div class="player-header">
           <input type="text" id="name-p2" class="player-name" value="Blader 2" maxlength="16" aria-label="Player 2 name">
-          <span class="player-badge">BLUE</span>
         </div>
         <div class="score-display">
           <span id="score-p2" class="score-num">0</span>
-          <span class="score-label">/ 4 分</span>
+          <span class="score-label" aria-hidden="true"></span>
         </div>
-        <div class="score-track" id="track-p2" aria-label="Player 2 score progress"></div>
-        <p class="finish-hint">按對手陀螺的結局方式計分</p>
         <div class="finish-buttons">
           <button class="btn-finish spin" data-player="2" data-type="spin">
             <span class="finish-icon">🌀</span>
-            <span class="finish-name">殘存結局<em>Spin</em></span>
+            <span class="finish-name">殘存</span>
             <strong>+1</strong>
           </button>
           <button class="btn-finish burst" data-player="2" data-type="burst">
             <span class="finish-icon">💥</span>
-            <span class="finish-name">爆裂結局<em>Burst</em></span>
+            <span class="finish-name">爆裂</span>
             <strong>+2</strong>
           </button>
           <button class="btn-finish over" data-player="2" data-type="over">
             <span class="finish-icon">⬆</span>
-            <span class="finish-name">擊飛結局<em>Over</em></span>
+            <span class="finish-name">擊飛</span>
             <strong>+2</strong>
           </button>
           <button class="btn-finish extreme" data-player="2" data-type="extreme">
             <span class="finish-icon">⚡</span>
-            <span class="finish-name">極致收尾<em>Xtreme</em></span>
+            <span class="finish-name">極致</span>
             <strong>+3</strong>
           </button>
         </div>
@@ -197,12 +188,24 @@
         <h2>選手名單 · 抽籤 · 賽程表</h2>
         <div class="tournament-header-actions">
           <span id="tournament-sync-status" class="tournament-sync-status" data-status="local" title="多部裝置同步">本機</span>
+          <span id="cloud-sync-status" class="tournament-sync-status cloud-sync-status" data-status="idle" title="Supabase 雲端" hidden>雲端</span>
           <span id="draw-status" class="draw-badge">未抽籤</span>
           <button id="btn-draw" class="btn btn-sm btn-primary" type="button">🎲 抽籤配對</button>
           <button id="btn-reset-bracket" class="btn btn-sm btn-ghost" type="button">重設賽程</button>
         </div>
       </div>
       <p class="tournament-rundown">比賽流程：初賽 → 復活賽（僅初賽落敗）→ 複賽（落敗直接淘汰）→ 四強挑戰 → 準決賽 → 決賽 · 無季軍戰</p>
+      <aside class="player-qr-card" id="player-qr-card" aria-label="選手查閱 QR">
+        <div class="player-qr-card-inner">
+          <img id="player-qr" class="player-qr-img" alt="選手查閱 QR" width="140" height="140" hidden>
+          <div class="player-qr-meta">
+            <h3 class="player-qr-title">選手查閱 QR</h3>
+            <p class="player-qr-hint">掃碼查看賽程、即時比分與回放。設有 <code>arena-config.local.js</code> 時使用 Vercel 固定連結；否則需同一 Wi‑Fi。</p>
+            <p id="player-qr-link" class="player-qr-link"></p>
+            <button id="btn-copy-player-link" class="btn btn-sm btn-ghost" type="button">複製連結</button>
+          </div>
+        </div>
+      </aside>
       <div class="tournament-body">
         <div class="roster-panel">
           <div class="roster-toolbar">
@@ -342,7 +345,9 @@
     <div id="view-replay" class="app-view">
       <div class="replay-panel replay-panel-full">
         <div class="panel-header">
-          <h2>戰鬥回放 <span id="replay-count" class="replay-count-badge" hidden></span></h2>
+          <h2>戰鬥回放 <span id="replay-count" class="replay-count-badge" hidden></span>
+            <span id="replay-sync-status" class="replay-sync-status" data-status="idle" hidden></span>
+          </h2>
           <button id="btn-clear-replays" class="btn btn-sm btn-ghost" type="button">清除全部</button>
         </div>
         <p class="replay-hint">同一 Match 的多局會歸在同一組；有鏡頭時每局另存影片。重播得分會全螢幕播放，並依實際時間軸同步得分事件。</p>
@@ -429,6 +434,8 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+  <script src="arena-config.local.js" onerror="void 0"></script>
+  <script src="supabase-sync.js"></script>
   <script src="tournament.js"></script>
   <script src="bey-detect.js"></script>
   <script src="bey-scan.js"></script>
