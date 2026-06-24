@@ -325,6 +325,32 @@ async function pollReplays() {
   }
 }
 
+function replayDownloadFilename(replay) {
+  const safe = (s) => String(s || '').replace(/[^\w\u4e00-\u9fff-]+/g, '-').replace(/^-|-$/g, '') || 'player';
+  return `beyblade-${safe(replay.p1Name)}-vs-${safe(replay.p2Name)}-b${replay.battleNum}.webm`;
+}
+
+async function downloadReplayVideo(replay) {
+  const videoUrl = `/replay/${replay.id}/video.webm`;
+  const filename = replayDownloadFilename(replay);
+  try {
+    const res = await fetch(`${videoUrl}?download=1`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`download ${res.status}`);
+    const blobUrl = URL.createObjectURL(await res.blob());
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    console.warn('Replay download failed', err);
+    window.open(videoUrl, '_blank', 'noopener');
+  }
+}
+
 function playReplay(replayId) {
   const replay = state.replays.find((r) => r.id === replayId);
   if (!replay) return;
@@ -333,18 +359,25 @@ function playReplay(replayId) {
   const player = $('#replay-player');
   const video = $('#replay-video');
   const title = $('#replay-player-title');
+  const downloadBtn = $('#btn-replay-download');
+  const hasVideo = replay.hasVideo || replay.videoId;
 
   player.hidden = false;
   title.textContent = `${replay.p1Name} vs ${replay.p2Name} · 第 ${replay.battleNum} 局`;
 
-  if (replay.hasVideo || replay.videoId) {
+  if (hasVideo) {
     video.src = `/replay/${replay.id}/video.webm`;
     video.hidden = false;
     video.play().catch(() => {});
+    if (downloadBtn) {
+      downloadBtn.hidden = false;
+      downloadBtn.onclick = () => { downloadReplayVideo(replay).catch(console.error); };
+    }
   } else {
     video.removeAttribute('src');
     video.hidden = true;
     title.textContent += '（無影片）';
+    if (downloadBtn) downloadBtn.hidden = true;
   }
 
   renderReplays();

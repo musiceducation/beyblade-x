@@ -163,9 +163,7 @@ let finishAnnounceHideTimer = null;
 function showFinishAnnounce(type, player, points) {
   const overlay = $('#finish-announce');
   const replayActive = document.body.classList.contains('replay-theater-active');
-  const inLive = document.body.classList.contains('launch-live');
-  const inLaunch = document.body.classList.contains('launch-active');
-  if (replayActive || inLive || inLaunch) return;
+  if (replayActive) return;
   if (!overlay) return;
 
   const f = FINISH_LABELS[type];
@@ -1068,6 +1066,57 @@ function playBeep(freq, duration) {
   osc.stop(audioCtx.currentTime + duration);
 }
 
+function playFinishImpact(type) {
+  if (!audioCtx) return;
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+
+  const now = audioCtx.currentTime;
+  const gain = audioCtx.createGain();
+  const osc = audioCtx.createOscillator();
+  const punchFreq = {
+    spin: 520,
+    burst: 95,
+    over: 220,
+    extreme: 70,
+  }[type] || 180;
+
+  osc.type = type === 'spin' ? 'sawtooth' : 'square';
+  osc.frequency.setValueAtTime(punchFreq * 1.8, now);
+  osc.frequency.exponentialRampToValueAtTime(punchFreq, now + 0.16);
+  gain.gain.setValueAtTime(type === 'extreme' ? 0.18 : 0.14, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(now);
+  osc.stop(now + 0.45);
+
+  const noiseBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.18, audioCtx.sampleRate);
+  const data = noiseBuffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) {
+    data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+  }
+  const noise = audioCtx.createBufferSource();
+  const noiseGain = audioCtx.createGain();
+  noise.buffer = noiseBuffer;
+  noiseGain.gain.setValueAtTime(type === 'spin' ? 0.04 : 0.1, now);
+  noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+  noise.connect(noiseGain);
+  noiseGain.connect(audioCtx.destination);
+  noise.start(now);
+}
+
+function speakFinishTerm(type) {
+  const f = FINISH_LABELS[type];
+  if (!f || !('speechSynthesis' in window)) return;
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(f.en);
+  utterance.lang = 'en-US';
+  utterance.rate = 0.88;
+  utterance.pitch = type === 'extreme' ? 0.72 : 0.82;
+  utterance.volume = 1;
+  setTimeout(() => window.speechSynthesis.speak(utterance), 120);
+}
+
 function flashScreen(className = '', duration = 80, peakOpacity = 0.85) {
   const flash = $('#flash-overlay');
   flash.className = className;
@@ -1115,19 +1164,19 @@ function triggerFinishEffect(type, player) {
   const liteFx = inLive || inLaunch;
 
   if (type === 'burst') {
-    if (!liteFx) shakeScreen('heavy', 600);
+    shakeScreen('heavy', liteFx ? 420 : 600);
     flashScreen('burst-flash');
     burstRing(color);
     spawnParticles(scaledFxCount(liteFx ? 18 : 40), color, 'burst');
     playBeep(120, 0.15);
   } else if (type === 'extreme') {
-    if (!liteFx) shakeScreen('heavy', 600);
+    shakeScreen('heavy', liteFx ? 520 : 600);
     flashScreen('extreme-flash');
     spawnParticles(scaledFxCount(liteFx ? 28 : 80), '#bf5af2', 'extreme');
     spawnParticles(scaledFxCount(liteFx ? 14 : 40), '#ffd60a', 'extreme');
     playBeep(80, 0.25);
   } else if (type === 'over') {
-    if (!liteFx) shakeScreen('light', 400);
+    shakeScreen('light', liteFx ? 340 : 400);
     flashScreen();
     spawnParticles(scaledFxCount(liteFx ? 10 : 25), '#ffd60a', 'over');
     playBeep(300, 0.1);
@@ -1135,6 +1184,9 @@ function triggerFinishEffect(type, player) {
     spawnParticles(scaledFxCount(liteFx ? 8 : 15), color, 'spin');
     playBeep(520, 0.06);
   }
+
+  playFinishImpact(type);
+  speakFinishTerm(type);
 }
 
 function burstRing(color, delay = 0, ringIndex = 1) {

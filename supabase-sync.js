@@ -1,11 +1,13 @@
 /**
- * Push tournament + replay data from the arena host to Supabase (cloud).
- * Requires window.ARENA_CONFIG in arena-config.local.js
+ * Push tournament + replay data from the arena host to Supabase via local server proxy.
+ * Secret key lives in arena-secrets.local.json (read by serve-https.py only).
  */
 
 const supabaseSyncState = {
   lastTournamentRevision: -1,
   tournamentPushing: false,
+  lastError: null,
+  cloudServerReady: false,
 };
 
 function getArenaConfig() {
@@ -14,69 +16,62 @@ function getArenaConfig() {
 
 function isSupabaseSyncEnabled() {
   const c = getArenaConfig();
-  return Boolean(c?.supabase?.url && c?.supabase?.serviceKey && c?.eventSlug);
+  return Boolean(c?.eventSlug && supabaseSyncState.cloudServerReady);
 }
 
-function supabaseHeaders() {
-  const key = getArenaConfig().supabase.serviceKey;
-  return {
-    apikey: key,
-    Authorization: `Bearer ${key}`,
-    'Content-Type': 'application/json',
-  };
-}
-
-function supabaseBase() {
-  return getArenaConfig().supabase.url.replace(/\/$/, '');
-}
-
-function replayStoragePath(replayId) {
-  return `${getArenaConfig().eventSlug}/${replayId}.webm`;
+function supabasePublicUrl() {
+  const url = getArenaConfig()?.supabase?.url;
+  return url ? url.replace(/\/$/, '') : null;
 }
 
 function replayPublicVideoUrl(replayId) {
-  if (!isSupabaseSyncEnabled()) return null;
-  const base = supabaseBase();
-  const slug = getArenaConfig().eventSlug;
+  const base = supabasePublicUrl();
+  const slug = getArenaConfig()?.eventSlug;
+  if (!base || !slug) return null;
   return `${base}/storage/v1/object/public/replay-videos/${slug}/${replayId}.webm`;
+}
+
+async function refreshCloudStatus() {
+  try {
+    const res = await fetch('/cloud/status.json', { cache: 'no-store' });
+    const data = await res.json();
+    supabaseSyncState.cloudServerReady = Boolean(data.ok);
+    return data;
+  } catch {
+    supabaseSyncState.cloudServerReady = false;
+    return null;
+  }
 }
 
 async function pushTournamentToSupabase(revision, junior, senior) {
   if (!isSupabaseSyncEnabled() || supabaseSyncState.tournamentPushing) return false;
-  if (typeof revision !== 'number' || revision <= supabaseSyncState.lastTournamentRevision) {
+
+  const rev = Math.max(revision, supabaseSyncState.lastTournamentRevision + 1);
+  if (typeof rev !== 'number' || rev <= supabaseSyncState.lastTournamentRevision) {
     return false;
   }
 
   supabaseSyncState.tournamentPushing = true;
   try {
-    const body = {
-      event_slug: getArenaConfig().eventSlug,
-      revision,
-      updated_at: new Date().toISOString(),
-      junior: junior || {},
-      senior: senior || {},
-    };
-
-    const res = await fetch(`${supabaseBase()}/rest/v1/arena_state`, {
+    const res = await fetch('/cloud/tournament.json', {
       method: 'POST',
-      headers: {
-        ...supabaseHeaders(),
-        Prefer: 'resolution=merge-duplicates',
-      },
-      body: JSON.stringify(body),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revision: rev, junior: junior || {}, senior: senior || {} }),
     });
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`arena_state ${res.status} ${text}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || `cloud tournament ${res.status}`);
     }
 
-    supabaseSyncState.lastTournamentRevision = revision;
+    supabaseSyncState.lastTournamentRevision = rev;
+    supabaseSyncState.lastError = null;
     if (typeof updateCloudSyncIndicator === 'function') updateCloudSyncIndicator('synced');
     return true;
   } catch (err) {
-    console.warn('Supabase tournament push failed', err);
-    if (typeof updateCloudSyncIndicator === 'function') updateCloudSyncIndicator('error');
+    supabaseSyncState.lastError = String(err.message || err);
+    console.warn('Cloud tournament push failed', err);
+    if (typeof updateCloudSyncIndicator === 'function') updateCloudSyncIndicator('error', supabaseSyncState.lastError);
     return false;
   } finally {
     supabaseSyncState.tournamentPushing = false;
@@ -92,59 +87,28 @@ async function uploadReplayToSupabase(session, blob, attempt = 0) {
   if (!isSupabaseSyncEnabled() || !session?.id) return false;
 
   const maxAttempts = 3;
-  const eventSlug = getArenaConfig().eventSlug;
 
   try {
-    const metaRow = {
-      id: session.id,
-      event_slug: eventSlug,
-      match_group_id: session.matchGroupId || session.id,
-      battle_num: session.battleNum || 1,
-      metadata: session,
-      has_video: Boolean(blob && session.videoId),
-      updated_at: new Date().toISOString(),
-    };
-
-    const metaRes = await fetch(`${supabaseBase()}/rest/v1/arena_replays`, {
+    const metaRes = await fetch('/cloud/replay/meta.json', {
       method: 'POST',
-      headers: {
-        ...supabaseHeaders(),
-        Prefer: 'resolution=merge-duplicates',
-      },
-      body: JSON.stringify(metaRow),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(session),
     });
-
-    if (!metaRes.ok) {
-      const text = await metaRes.text().catch(() => '');
-      throw new Error(`arena_replays ${metaRes.status} ${text}`);
+    const metaData = await metaRes.json().catch(() => ({}));
+    if (!metaRes.ok || !metaData.ok) {
+      throw new Error(metaData.error || `cloud replay meta ${metaRes.status}`);
     }
 
     if (blob && session.videoId && blob.size > 1024) {
-      const path = replayStoragePath(session.id);
-      const videoRes = await fetch(
-        `${supabaseBase()}/storage/v1/object/replay-videos/${path}`,
-        {
-          method: 'POST',
-          headers: {
-            apikey: getArenaConfig().supabase.serviceKey,
-            Authorization: `Bearer ${getArenaConfig().supabase.serviceKey}`,
-            'Content-Type': 'video/webm',
-            'x-upsert': 'true',
-          },
-          body: blob,
-        },
-      );
-
-      if (!videoRes.ok) {
-        const text = await videoRes.text().catch(() => '');
-        throw new Error(`storage ${videoRes.status} ${text}`);
-      }
-
-      await fetch(`${supabaseBase()}/rest/v1/arena_replays?id=eq.${encodeURIComponent(session.id)}`, {
-        method: 'PATCH',
-        headers: supabaseHeaders(),
-        body: JSON.stringify({ has_video: true, updated_at: new Date().toISOString() }),
+      const videoRes = await fetch(`/cloud/replay/${encodeURIComponent(session.id)}/video`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'video/webm' },
+        body: blob,
       });
+      const videoData = await videoRes.json().catch(() => ({}));
+      if (!videoRes.ok || !videoData.ok) {
+        throw new Error(videoData.error || `cloud replay video ${videoRes.status}`);
+      }
     }
 
     session.cloudSynced = true;
@@ -157,7 +121,7 @@ async function uploadReplayToSupabase(session, blob, attempt = 0) {
     }
     session.cloudSynced = false;
     session.cloudSyncError = String(err.message || err);
-    console.warn('Supabase replay upload failed', err);
+    console.warn('Cloud replay upload failed', err);
     return false;
   }
 }
@@ -168,10 +132,11 @@ function getPlayerPortalUrl() {
   return null;
 }
 
-function updateCloudSyncIndicator(status) {
+function updateCloudSyncIndicator(status, detail) {
   const el = $('#cloud-sync-status');
   if (!el) return;
-  if (!isSupabaseSyncEnabled()) {
+  const c = getArenaConfig();
+  if (!c?.eventSlug) {
     el.hidden = true;
     return;
   }
@@ -181,15 +146,24 @@ function updateCloudSyncIndicator(status) {
     syncing: '雲端同步中…',
     error: '雲端失敗',
     idle: '雲端待命',
+    unconfigured: '雲端未設定',
   };
   el.textContent = labels[status] || labels.idle;
   el.dataset.status = status;
+  el.title = detail || (status === 'error' && supabaseSyncState.lastError) || 'Supabase 雲端';
 }
 
 function initSupabaseSync() {
-  if (isSupabaseSyncEnabled()) {
-    updateCloudSyncIndicator('idle');
-  }
+  refreshCloudStatus().then((data) => {
+    if (isSupabaseSyncEnabled()) {
+      updateCloudSyncIndicator('idle');
+    } else if (getArenaConfig()?.eventSlug) {
+      updateCloudSyncIndicator(
+        'unconfigured',
+        '請建立 arena-secrets.local.json（含 service key）並重啟 ./start.sh',
+      );
+    }
+  });
 }
 
 let cloudPushTimer = null;
@@ -202,7 +176,7 @@ function scheduleCloudTournamentPush() {
     updateCloudSyncIndicator('syncing');
     const payload = buildFullSyncPayload();
     const rev = typeof tournamentSync !== 'undefined' ? tournamentSync.revision : 0;
-    payload.revision = Math.max(rev, supabaseSyncState.lastTournamentRevision + 1, Date.now());
+    payload.revision = Math.max(rev, supabaseSyncState.lastTournamentRevision + 1);
     pushTournamentPayloadToSupabase(payload).catch(console.error);
   }, 600);
 }

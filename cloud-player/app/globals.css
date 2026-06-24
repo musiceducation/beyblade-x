@@ -353,12 +353,37 @@ body {
   background: #000;
 }
 
+.player-replay-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-card);
+}
+
 .player-replay-title {
   margin: 0;
-  padding: 0.5rem 0.75rem;
+  flex: 1;
+  min-width: 0;
   font-size: 0.8rem;
   color: var(--muted);
-  background: var(--bg-card);
+}
+
+.player-replay-download {
+  flex-shrink: 0;
+  font-family: var(--font);
+  font-size: 0.75rem;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--gold);
+  cursor: pointer;
+}
+
+.player-replay-download:hover {
+  background: rgba(255, 214, 10, 0.08);
 }
 
 .player-footer {

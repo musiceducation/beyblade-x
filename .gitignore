@@ -14,3 +14,4 @@ key.pem
 
 # Supabase host credentials (copy from arena-config.example.js)
 arena-config.local.js
+arena-secrets.local.json

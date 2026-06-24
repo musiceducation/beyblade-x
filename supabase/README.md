@@ -10,28 +10,36 @@
 4. **Project Settings → API** 記下：
    - Project URL
    - `anon` public key（俾 Vercel）
-   - `service_role` key（**只放主機**，唔好 commit）
+   - `service_role` / secret key（**只放主機** `arena-secrets.local.json`，唔好 commit）
 
 ## 2. 場內主機（現有專案）
 
 ```bash
 cp arena-config.example.js arena-config.local.js
+cp arena-secrets.example.json arena-secrets.local.json
 ```
 
-編輯 `arena-config.local.js`：
+編輯 `arena-config.local.js`（瀏覽器可見，只放公開設定）：
 
 ```javascript
 window.ARENA_CONFIG = {
-  eventSlug: 'mie-mie-2026',           // 與 Vercel 環境變數一致
+  eventSlug: 'mie-mie-2026',
   playerPortalUrl: 'https://xxx.vercel.app',
-  supabase: {
-    url: 'https://xxxx.supabase.co',
-    serviceKey: 'eyJ...service_role...',
-  },
+  supabase: { url: 'https://xxxx.supabase.co' },
 };
 ```
 
-啟動 `./start.sh`。賽程變更同回放結束後會自動 sync 去 Supabase。  
+編輯 `arena-secrets.local.json`（**只俾 serve-https.py 讀**，唔會送到瀏覽器）：
+
+```json
+{
+  "eventSlug": "mie-mie-2026",
+  "supabaseUrl": "https://xxxx.supabase.co",
+  "supabaseServiceKey": "sb_secret_..."
+}
+```
+
+啟動 `./start.sh`。賽程變更同回放結束後會經本機 `/cloud/*` 代理 sync 去 Supabase。  
 「選手·賽程」分頁 QR 會用 `playerPortalUrl`（有設定時）。
 
 ## 3. Vercel（cloud-player）
@@ -59,8 +67,9 @@ npx vercel --prod
 
 ```
 主機 index.html
-  → pushTournamentPayloadToSupabase (arena_state)
-  → uploadReplayToSupabase (arena_replays + Storage)
+  → POST /cloud/tournament.json (serve-https.py)
+  → POST /cloud/replay/* (serve-https.py)
+  → Supabase arena_state / arena_replays + Storage
 
 選手 https://xxx.vercel.app
   → Supabase anon 讀取 arena_state / arena_replays
@@ -69,7 +78,8 @@ npx vercel --prod
 
 ## 安全注意
 
-- `service_role` 只放 `arena-config.local.js`（已 gitignore）
+- `supabaseServiceKey` 只放 `arena-secrets.local.json`（已 gitignore）
+- 瀏覽器 **唔會** 直接 call Supabase with secret key
 - 選手頁只用 `anon` key；RLS 只開放 **SELECT**
 - 勿把 service key 放進 Vercel 或 GitHub
 
@@ -77,7 +87,8 @@ npx vercel --prod
 
 | 問題 | 檢查 |
 |------|------|
-| 雲端無賽程 | 主機有無 `arena-config.local.js`、header 是否顯示「雲端已同步」 |
+| 雲端無賽程 | 有無 `arena-secrets.local.json`、重啟 `./start.sh`、`/cloud/status.json` 是否 `ok: true` |
+| 401 secret key in browser | 從 `arena-config.local.js` 移除 `serviceKey`，改用 `arena-secrets.local.json` |
 | 無回放影片 | Storage bucket 是否 public、主機 replay 有無錄到片 |
 | Vercel 空白 | `NEXT_PUBLIC_EVENT_SLUG` 是否與主機 `eventSlug` 相同 |
-| CORS / 403 | 是否執行 `schema.sql` 的 RLS policies |
+| permission denied | 執行 [`grants-fix.sql`](./grants-fix.sql) |

@@ -880,11 +880,52 @@ function stopReplayPlayback(options = {}) {
   }
 }
 
+function replayHasVideo(replay) {
+  return !!(replay?.videoId || replay?.hasVideo);
+}
+
+function replayServerVideoUrl(replay) {
+  return `/replay/${replay.id}/video.webm`;
+}
+
+function replayDownloadFilename(replay) {
+  const safe = (s) => String(s || '').replace(/[^\w\u4e00-\u9fff-]+/g, '-').replace(/^-|-$/g, '') || 'player';
+  return `beyblade-${safe(replay.p1Name)}-vs-${safe(replay.p2Name)}-b${replay.battleNum}.webm`;
+}
+
+async function downloadReplayVideo(replay, videoUrl) {
+  if (!videoUrl || !replay) return;
+  const filename = replayDownloadFilename(replay);
+  try {
+    let blobUrl = videoUrl;
+    if (!videoUrl.startsWith('blob:')) {
+      const res = await fetch(`${videoUrl}?download=1`, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`download ${res.status}`);
+      blobUrl = URL.createObjectURL(await res.blob());
+    }
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    if (blobUrl !== videoUrl) URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    console.warn('Replay download failed', err);
+    window.open(videoUrl, '_blank', 'noopener');
+  }
+}
+
 async function loadReplayVideoUrl(replay) {
-  if (!replay?.videoId) return null;
-  const blob = await getReplayVideo(replay.videoId);
-  if (!blob) return null;
-  return trackVideoUrl(URL.createObjectURL(blob));
+  if (!replayHasVideo(replay)) return null;
+  if (replay.videoId) {
+    try {
+      const blob = await getReplayVideo(replay.videoId);
+      if (blob?.size > 0) return trackVideoUrl(URL.createObjectURL(blob));
+    } catch (_) { /* fall through to server */ }
+  }
+  return replayServerVideoUrl(replay);
 }
 
 async function openReplayPlayer(id, options = {}) {
@@ -920,12 +961,7 @@ async function openReplayPlayer(id, options = {}) {
     video.src = videoUrl;
     video.hidden = false;
     downloadBtn.hidden = false;
-    downloadBtn.onclick = () => {
-      const a = document.createElement('a');
-      a.href = videoUrl;
-      a.download = `beyblade-replay-b${replay.battleNum}.webm`;
-      a.click();
-    };
+    downloadBtn.onclick = () => { downloadReplayVideo(replay, videoUrl).catch(console.error); };
   } else if (video) {
     video.hidden = true;
     downloadBtn.hidden = true;

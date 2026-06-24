@@ -49,6 +49,36 @@ function formatMatchScore(match: Match) {
   return `${scores[0]} : ${scores[1]}`;
 }
 
+function replayDownloadFilename(meta: { p1Name?: string; p2Name?: string; battleNum?: number }) {
+  const safe = (s?: string) => (s || 'player').replace(/[^\w\u4e00-\u9fff-]+/g, '-').replace(/^-|-$/g, '') || 'player';
+  return `beyblade-${safe(meta.p1Name)}-vs-${safe(meta.p2Name)}-b${meta.battleNum ?? 0}.webm`;
+}
+
+async function downloadCloudReplay(
+  replay: ArenaReplayRow,
+  meta?: { p1Name?: string; p2Name?: string; battleNum?: number },
+) {
+  const videoUrl = replayVideoUrl(replay.id);
+  if (!videoUrl) return;
+  const filename = replayDownloadFilename(meta || {});
+  try {
+    const res = await fetch(videoUrl, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`download ${res.status}`);
+    const blobUrl = URL.createObjectURL(await res.blob());
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    console.warn('Replay download failed', err);
+    window.open(videoUrl, '_blank', 'noopener');
+  }
+}
+
 function groupReplays(replays: ArenaReplayRow[]) {
   const map = new Map<string, ArenaReplayRow[]>();
   replays.forEach((r) => {
@@ -393,10 +423,21 @@ export default function PlayerPortal() {
                     src={replayVideoUrl(activeReplay.id) || undefined}
                   />
                 ) : null}
-                <p className="player-replay-title">
-                  {activeMeta?.p1Name} vs {activeMeta?.p2Name} · 第 {activeMeta?.battleNum} 局
-                  {!activeReplay.has_video ? '（無影片）' : ''}
-                </p>
+                <div className="player-replay-footer">
+                  <p className="player-replay-title">
+                    {activeMeta?.p1Name} vs {activeMeta?.p2Name} · 第 {activeMeta?.battleNum} 局
+                    {!activeReplay.has_video ? '（無影片）' : ''}
+                  </p>
+                  {activeReplay.has_video ? (
+                    <button
+                      type="button"
+                      className="player-replay-download"
+                      onClick={() => downloadCloudReplay(activeReplay, activeMeta)}
+                    >
+                      下載影片
+                    </button>
+                  ) : null}
+                </div>
               </div>
             )}
           </section>

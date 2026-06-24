@@ -11,7 +11,10 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.parse
+import urllib.request
+from datetime import datetime, timezone
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 PORT = 8443
@@ -171,6 +174,213 @@ def mark_replay_has_video(replay_id):
 def parse_replay_id_from_path(path):
     match = re.fullmatch(r'/replay/(r-[a-zA-Z0-9-]+)/video(?:\.webm)?', path)
     return match.group(1) if match else None
+
+
+CLOUD_SECRETS_PATH = os.path.join(DIR, 'arena-secrets.local.json')
+ARENA_CONFIG_JS = os.path.join(DIR, 'arena-config.local.js')
+_cloud_config_cache = None
+_cloud_config_mtime = 0.0
+
+
+def _parse_arena_config_js():
+    if not os.path.isfile(ARENA_CONFIG_JS):
+        return {}
+    try:
+        with open(ARENA_CONFIG_JS, encoding='utf-8') as f:
+            text = f.read()
+    except OSError:
+        return {}
+    out = {}
+    for key, pattern in (
+        ('eventSlug', r"eventSlug:\s*['\"]([^'\"]+)"),
+        ('supabaseUrl', r"url:\s*['\"](https://[^'\"]+)"),
+        ('supabaseServiceKey', r"serviceKey:\s*['\"]([^'\"]+)"),
+        ('playerPortalUrl', r"playerPortalUrl:\s*['\"]([^'\"]+)"),
+    ):
+        match = re.search(pattern, text)
+        if match:
+            out[key] = match.group(1)
+    return out
+
+
+def get_cloud_config():
+    global _cloud_config_cache, _cloud_config_mtime
+
+    secrets_mtime = os.path.getmtime(CLOUD_SECRETS_PATH) if os.path.isfile(CLOUD_SECRETS_PATH) else 0.0
+    js_mtime = os.path.getmtime(ARENA_CONFIG_JS) if os.path.isfile(ARENA_CONFIG_JS) else 0.0
+    max_mtime = max(secrets_mtime, js_mtime)
+    if _cloud_config_cache is not None and max_mtime == _cloud_config_mtime:
+        return _cloud_config_cache
+
+    cfg = {}
+    if os.path.isfile(CLOUD_SECRETS_PATH):
+        try:
+            with open(CLOUD_SECRETS_PATH, encoding='utf-8') as f:
+                cfg.update(json.load(f))
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    js_cfg = _parse_arena_config_js()
+    for key, value in js_cfg.items():
+        if key == 'supabaseServiceKey' and cfg.get('supabaseServiceKey'):
+            continue
+        cfg.setdefault(key, value)
+
+    service_key = cfg.get('supabaseServiceKey') or cfg.get('serviceKey')
+    supabase_url = (cfg.get('supabaseUrl') or cfg.get('url') or '').rstrip('/')
+    event_slug = cfg.get('eventSlug')
+
+    if service_key and supabase_url and event_slug:
+        _cloud_config_cache = {
+            'eventSlug': event_slug,
+            'supabaseUrl': supabase_url,
+            'supabaseServiceKey': service_key,
+            'playerPortalUrl': cfg.get('playerPortalUrl'),
+        }
+    else:
+        _cloud_config_cache = None
+
+    _cloud_config_mtime = max_mtime
+    return _cloud_config_cache
+
+
+def _utc_iso():
+    return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S') + 'Z'
+
+
+def _supabase_request(method, path, body=None, content_type='application/json', extra_headers=None):
+    cfg = get_cloud_config()
+    if not cfg:
+        return None, b'cloud not configured'
+
+    url = f"{cfg['supabaseUrl']}{path}"
+    headers = {
+        'apikey': cfg['supabaseServiceKey'],
+        'Authorization': f"Bearer {cfg['supabaseServiceKey']}",
+    }
+    if content_type:
+        headers['Content-Type'] = content_type
+    if extra_headers:
+        headers.update(extra_headers)
+
+    data = None
+    if body is not None:
+        data = body if isinstance(body, bytes) else body.encode('utf-8')
+
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return resp.status, resp.read()
+    except urllib.error.HTTPError as err:
+        return err.code, err.read()
+    except OSError as err:
+        return None, str(err).encode('utf-8')
+
+
+def push_tournament_to_cloud(revision, junior, senior):
+    cfg = get_cloud_config()
+    if not cfg:
+        return False, 'cloud not configured'
+
+    body = json.dumps({
+        'event_slug': cfg['eventSlug'],
+        'revision': revision,
+        'updated_at': _utc_iso(),
+        'junior': junior or {},
+        'senior': senior or {},
+    })
+
+    status, raw = _supabase_request(
+        'POST',
+        '/rest/v1/arena_state?on_conflict=event_slug',
+        body,
+        extra_headers={'Prefer': 'resolution=merge-duplicates,return=minimal'},
+    )
+
+    if status == 409:
+        patch = json.dumps({
+            'revision': revision,
+            'updated_at': json.loads(body)['updated_at'],
+            'junior': junior or {},
+            'senior': senior or {},
+        })
+        slug = urllib.parse.quote(cfg['eventSlug'], safe='')
+        status, raw = _supabase_request(
+            'PATCH',
+            f'/rest/v1/arena_state?event_slug=eq.{slug}',
+            patch,
+        )
+
+    if status and 200 <= status < 300:
+        return True, None
+
+    text = raw.decode('utf-8', errors='replace') if isinstance(raw, bytes) else str(raw)
+    return False, f'arena_state {status} {text}'
+
+
+def push_replay_meta_to_cloud(session):
+    cfg = get_cloud_config()
+    replay_id = session.get('id') if session else None
+    if not cfg or not replay_id:
+        return False, 'invalid replay'
+
+    meta_row = json.dumps({
+        'id': replay_id,
+        'event_slug': cfg['eventSlug'],
+        'match_group_id': session.get('matchGroupId') or replay_id,
+        'battle_num': session.get('battleNum') or 1,
+        'metadata': session,
+        'has_video': bool(session.get('videoId')),
+        'updated_at': _utc_iso(),
+    })
+
+    status, raw = _supabase_request(
+        'POST',
+        '/rest/v1/arena_replays?on_conflict=id',
+        meta_row,
+        extra_headers={'Prefer': 'resolution=merge-duplicates,return=minimal'},
+    )
+
+    if status and 200 <= status < 300:
+        return True, None
+
+    text = raw.decode('utf-8', errors='replace') if isinstance(raw, bytes) else str(raw)
+    return False, f'arena_replays {status} {text}'
+
+
+def push_replay_video_to_cloud(replay_id, video_bytes):
+    cfg = get_cloud_config()
+    if not cfg:
+        return False, 'cloud not configured'
+    if not replay_id or len(video_bytes) < 1024:
+        return False, 'video too small'
+
+    storage_path = f"{cfg['eventSlug']}/{replay_id}.webm"
+    status, raw = _supabase_request(
+        'POST',
+        f'/storage/v1/object/replay-videos/{storage_path}',
+        video_bytes,
+        content_type='video/webm',
+        extra_headers={'x-upsert': 'true'},
+    )
+
+    if not status or status < 200 or status >= 300:
+        text = raw.decode('utf-8', errors='replace') if isinstance(raw, bytes) else str(raw)
+        return False, f'storage {status} {text}'
+
+    patch = json.dumps({'has_video': True, 'updated_at': _utc_iso()})
+    rid = urllib.parse.quote(replay_id, safe='')
+    status, raw = _supabase_request(
+        'PATCH',
+        f'/rest/v1/arena_replays?id=eq.{rid}',
+        patch,
+    )
+
+    if status and 200 <= status < 300:
+        return True, None
+
+    text = raw.decode('utf-8', errors='replace') if isinstance(raw, bytes) else str(raw)
+    return False, f'arena_replays patch {status} {text}'
 
 
 def find_binary(name, brew_paths=()):
@@ -409,12 +619,15 @@ class ArenaHandler(http.server.SimpleHTTPRequestHandler):
         length = int(self.headers.get('Content-Length', '0') or '0')
         return self.rfile.read(length) if length else b''
 
-    def _send_video_file(self, filepath, replay_id):
+    def _send_video_file(self, filepath, replay_id, download_name=None):
         if not os.path.isfile(filepath):
             self.send_error(404)
             return
 
         file_size = os.path.getsize(filepath)
+        disposition = None
+        if download_name:
+            disposition = f'attachment; filename="{download_name}"'
         range_header = self.headers.get('Range')
         if range_header:
             m = re.match(r'bytes=(\d+)-(\d*)', range_header)
@@ -435,6 +648,8 @@ class ArenaHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_header('Content-Range', f'bytes {start}-{end}/{file_size}')
                 self.send_header('Content-Length', str(length))
                 self.send_header('Cache-Control', 'no-store')
+                if disposition:
+                    self.send_header('Content-Disposition', disposition)
                 self.end_headers()
                 self.wfile.write(data)
                 return
@@ -446,6 +661,8 @@ class ArenaHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header('Accept-Ranges', 'bytes')
         self.send_header('Content-Length', str(len(data)))
         self.send_header('Cache-Control', 'no-store')
+        if disposition:
+            self.send_header('Content-Disposition', disposition)
         self.end_headers()
         self.wfile.write(data)
 
@@ -511,6 +728,15 @@ class ArenaHandler(http.server.SimpleHTTPRequestHandler):
                     self._send_json(dict(TOURNAMENT_STATE))
             return
 
+        if path == '/cloud/status.json':
+            cfg = get_cloud_config()
+            self._send_json({
+                'ok': cfg is not None,
+                'eventSlug': cfg['eventSlug'] if cfg else None,
+                'playerPortalUrl': cfg.get('playerPortalUrl') if cfg else None,
+            })
+            return
+
         if path == '/replay/index.json':
             since = 0
             query = urllib.parse.urlparse(self.path).query
@@ -533,7 +759,10 @@ class ArenaHandler(http.server.SimpleHTTPRequestHandler):
 
         replay_id = parse_replay_id_from_path(path)
         if replay_id and path.endswith('.webm'):
-            self._send_video_file(replay_video_path(replay_id), replay_id)
+            query = urllib.parse.urlparse(self.path).query
+            params = urllib.parse.parse_qs(query)
+            download_name = f'{replay_id}.webm' if params.get('download') else None
+            self._send_video_file(replay_video_path(replay_id), replay_id, download_name)
             return
 
         signal = self._signal_parts()
@@ -555,6 +784,45 @@ class ArenaHandler(http.server.SimpleHTTPRequestHandler):
         if path == '/dji/stop':
             DJI_RELAY.stop()
             self._send_json({'ok': True})
+            return
+
+        if path == '/cloud/tournament.json':
+            raw = self._read_body()
+            try:
+                payload = json.loads(raw.decode('utf-8') or '{}')
+            except json.JSONDecodeError:
+                self._send_json({'error': 'bad json'}, 400)
+                return
+
+            revision = payload.get('revision')
+            if revision is None:
+                self._send_json({'error': 'missing revision'}, 400)
+                return
+
+            ok, err = push_tournament_to_cloud(
+                revision,
+                payload.get('junior'),
+                payload.get('senior'),
+            )
+            if ok:
+                self._send_json({'ok': True, 'revision': revision})
+            else:
+                self._send_json({'ok': False, 'error': err}, 502)
+            return
+
+        if path == '/cloud/replay/meta.json':
+            raw = self._read_body()
+            try:
+                session = json.loads(raw.decode('utf-8') or '{}')
+            except json.JSONDecodeError:
+                self._send_json({'error': 'bad json'}, 400)
+                return
+
+            ok, err = push_replay_meta_to_cloud(session)
+            if ok:
+                self._send_json({'ok': True, 'id': session.get('id')})
+            else:
+                self._send_json({'ok': False, 'error': err}, 502)
             return
 
         if path == '/tournament/state.json':
@@ -626,6 +894,17 @@ class ArenaHandler(http.server.SimpleHTTPRequestHandler):
             with REPLAY_LOCK:
                 rev = REPLAY_STATE['revision']
             self._send_json({'ok': True, 'id': replay_id, 'revision': rev, 'bytes': len(raw)})
+            return
+
+        cloud_replay_video = re.fullmatch(r'/cloud/replay/(r-[a-zA-Z0-9-]+)/video', path)
+        if cloud_replay_video:
+            replay_id = cloud_replay_video.group(1)
+            raw = self._read_body()
+            ok, err = push_replay_video_to_cloud(replay_id, raw)
+            if ok:
+                self._send_json({'ok': True, 'id': replay_id, 'bytes': len(raw)})
+            else:
+                self._send_json({'ok': False, 'error': err}, 502)
             return
 
         signal = self._signal_parts()
