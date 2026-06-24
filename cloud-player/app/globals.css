@@ -382,8 +382,13 @@ body {
   cursor: pointer;
 }
 
-.player-replay-download:hover {
+.player-replay-download:hover:not(:disabled) {
   background: rgba(255, 214, 10, 0.08);
+}
+
+.player-replay-download:disabled {
+  opacity: 0.55;
+  cursor: wait;
 }
 
 .player-footer {

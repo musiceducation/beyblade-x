@@ -57,10 +57,15 @@ function replayDownloadFilename(meta: { p1Name?: string; p2Name?: string; battle
 async function downloadCloudReplay(
   replay: ArenaReplayRow,
   meta?: { p1Name?: string; p2Name?: string; battleNum?: number },
+  onStatus?: (status: 'idle' | 'downloading') => void,
 ) {
   const videoUrl = replayVideoUrl(replay.id);
   if (!videoUrl) return;
-  const filename = replayDownloadFilename(meta || {});
+  const filename = replayDownloadFilename({
+    ...meta,
+    battleNum: meta?.battleNum ?? replay.battle_num ?? 0,
+  });
+  onStatus?.('downloading');
   try {
     const res = await fetch(videoUrl, { cache: 'no-store' });
     if (!res.ok) throw new Error(`download ${res.status}`);
@@ -76,6 +81,8 @@ async function downloadCloudReplay(
   } catch (err) {
     console.warn('Replay download failed', err);
     window.open(videoUrl, '_blank', 'noopener');
+  } finally {
+    onStatus?.('idle');
   }
 }
 
@@ -108,6 +115,7 @@ export default function PlayerPortal() {
   const [replays, setReplays] = useState<ArenaReplayRow[]>([]);
   const [activeReplayId, setActiveReplayId] = useState<string | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
+  const [downloadStatus, setDownloadStatus] = useState<'idle' | 'downloading'>('idle');
 
   const poll = useCallback(async () => {
     const supabase = getSupabase();
@@ -432,9 +440,10 @@ export default function PlayerPortal() {
                     <button
                       type="button"
                       className="player-replay-download"
-                      onClick={() => downloadCloudReplay(activeReplay, activeMeta)}
+                      disabled={downloadStatus === 'downloading'}
+                      onClick={() => downloadCloudReplay(activeReplay, activeMeta, setDownloadStatus)}
                     >
-                      下載影片
+                      {downloadStatus === 'downloading' ? '下載中…' : '下載影片'}
                     </button>
                   ) : null}
                 </div>
