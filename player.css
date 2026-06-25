@@ -380,9 +380,27 @@ body {
   cursor: pointer;
 }
 
-.player-replay-download:hover {
+.player-replay-download:hover:not(:disabled) {
   background: rgba(255, 214, 10, 0.08);
 }
+
+.player-replay-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.player-next-alert {
+  margin: 0 0 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(255, 214, 10, 0.12);
+  border: 1px solid rgba(255, 214, 10, 0.35);
+  color: var(--gold);
+  font-size: 0.85rem;
+}
+
+.player-next-alert[hidden] { display: none; }
 
 .player-footer {
   padding: 0.5rem 1rem;

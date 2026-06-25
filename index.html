@@ -146,6 +146,7 @@
         </div>
         <audio id="go-shoot-audio" preload="auto" src="beyblade-burst-sparking--shu-321-go-shoot.mp3"></audio>
         <button id="btn-next-battle" class="btn btn-ghost btn-sm">下一局</button>
+        <button id="btn-undo-finish" class="btn btn-ghost btn-sm" type="button" disabled title="撤銷上一個得分">↩ 撤銷</button>
       </div>
 
       <article class="player-card player-blue" data-player="2">
@@ -191,6 +192,10 @@
           <span id="cloud-sync-status" class="tournament-sync-status cloud-sync-status" data-status="idle" title="Supabase 雲端" hidden>雲端</span>
           <span id="draw-status" class="draw-badge">未抽籤</span>
           <button id="btn-draw" class="btn btn-sm btn-primary" type="button">🎲 抽籤配對</button>
+          <button id="btn-export-csv" class="btn btn-sm btn-ghost" type="button">匯出 CSV</button>
+          <button id="btn-backup-tournament" class="btn btn-sm btn-ghost" type="button">備份</button>
+          <button id="btn-restore-tournament" class="btn btn-sm btn-ghost" type="button">還原</button>
+          <input id="restore-tournament-file" type="file" accept="application/json,.json" hidden>
           <button id="btn-reset-bracket" class="btn btn-sm btn-ghost" type="button">重設賽程</button>
         </div>
       </div>
@@ -203,6 +208,7 @@
             <p class="player-qr-hint">掃碼查看賽程、即時比分與回放。設有 <code>arena-config.local.js</code> 時使用 Vercel 固定連結；否則需同一 Wi‑Fi。</p>
             <p id="player-qr-link" class="player-qr-link"></p>
             <button id="btn-copy-player-link" class="btn btn-sm btn-ghost" type="button">複製連結</button>
+            <a id="overlay-link" href="overlay.html?session=junior" class="btn btn-sm btn-ghost" target="_blank" rel="noopener">OBS 投影</a>
           </div>
         </div>
       </aside>
@@ -338,8 +344,12 @@
       <div class="battle-log-panel battle-log-panel-full">
         <div class="panel-header">
           <h2>戰報</h2>
-          <button id="btn-clear-log" class="btn btn-sm btn-ghost">清除</button>
+          <div class="panel-header-actions">
+            <button id="btn-export-log" class="btn btn-sm btn-ghost" type="button">匯出</button>
+            <button id="btn-clear-log" class="btn btn-sm btn-ghost">清除</button>
+          </div>
         </div>
+        <p id="battle-log-stats" class="battle-log-stats"></p>
         <ul id="battle-log" class="battle-log" aria-live="polite"></ul>
       </div>
     </div>
@@ -370,6 +380,8 @@
               <button id="btn-replay-play-all" class="btn btn-ghost" type="button" hidden>▶ 重播整場 Match</button>
               <button id="btn-replay-stop" class="btn btn-ghost" type="button">停止</button>
               <button id="btn-replay-download" class="btn btn-ghost" type="button" hidden>下載影片</button>
+              <button id="btn-replay-share" class="btn btn-ghost" type="button" hidden>分享連結</button>
+              <button id="btn-replay-download-match" class="btn btn-ghost" type="button" hidden>下載整場</button>
               <button id="btn-replay-close" class="btn btn-ghost" type="button">關閉</button>
             </div>
           </aside>
@@ -430,6 +442,18 @@
     </div>
   </div>
 
+  <div id="sync-conflict-modal" class="sync-conflict-modal" hidden role="dialog" aria-labelledby="sync-conflict-title">
+    <div class="sync-conflict-backdrop"></div>
+    <div class="sync-conflict-card">
+      <h3 id="sync-conflict-title">同步衝突</h3>
+      <p>另一部裝置已更新賽程。要保留邊一份？</p>
+      <div class="sync-conflict-actions">
+        <button id="btn-sync-use-remote" class="btn btn-primary" type="button">使用伺服器版本</button>
+        <button id="btn-sync-keep-local" class="btn btn-ghost" type="button">保留本機版本</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Finish announcement toast -->
   <div id="finish-toast" class="finish-toast" hidden aria-live="polite">
     <span id="toast-text"></span>
@@ -437,6 +461,8 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
   <script src="arena-config.local.js" onerror="void 0"></script>
+  <script src="arena-shared.js"></script>
+  <script src="arena-pin.js"></script>
   <script src="supabase-sync.js"></script>
   <script src="tournament.js"></script>
   <script src="bey-detect.js"></script>

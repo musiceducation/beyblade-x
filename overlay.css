@@ -1,0 +1,117 @@
+:root {
+  --red: #ff2d55;
+  --blue: #00d4ff;
+  --gold: #ffd60a;
+  --text: #f4f7fb;
+  --panel: rgba(8, 12, 22, 0.88);
+  --panel-border: rgba(255, 255, 255, 0.12);
+  --font: 'Rajdhani', system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font);
+}
+
+.overlay-root {
+  display: inline-block;
+  padding: 1rem 1.25rem 1.1rem;
+  min-width: 360px;
+  max-width: 520px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(8px);
+}
+
+.overlay-header {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.overlay-session {
+  color: var(--gold);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.overlay-phase {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.8rem;
+}
+
+.overlay-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.overlay-scores {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.overlay-player {
+  flex: 1;
+  min-width: 0;
+}
+
+.overlay-player span {
+  display: block;
+  font-size: 1.05rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.overlay-player strong {
+  display: block;
+  font-size: 3.2rem;
+  line-height: 1;
+  font-weight: 700;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+}
+
+.overlay-player.red strong { color: var(--red); }
+.overlay-player.blue strong { color: var(--blue); }
+
+.overlay-vs {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.overlay-battle,
+.overlay-next-text,
+.overlay-empty {
+  margin: 0.5rem 0 0;
+  font-size: 0.95rem;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.overlay-empty {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.9rem;
+}
+
+.overlay-next {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.overlay-next-text {
+  font-weight: 600;
+}

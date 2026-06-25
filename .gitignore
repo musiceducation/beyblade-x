@@ -1,6 +1,8 @@
 # SSL certificates (generate locally with serve-https.py)
 cert.pem
 key.pem
+auto.crt
+auto.key
 
 # macOS
 .DS_Store

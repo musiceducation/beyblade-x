@@ -55,19 +55,6 @@ function playerName(data, id) {
   return p ? p.name : '待定';
 }
 
-function getAllMatches(data) {
-  const m = data?.matches;
-  if (!m?.prelim) return [];
-  return [
-    ...m.prelim,
-    ...(m.quarter || []),
-    ...(m.revival || []),
-    ...(m.challenge ? [m.challenge] : []),
-    ...(m.semi || []),
-    ...(m.final ? [m.final] : []),
-  ];
-}
-
 function matchInvolvesName(match, data, query) {
   if (!query) return true;
   const q = query.toLowerCase();
@@ -224,10 +211,39 @@ function renderSchedule() {
   }).join('');
 }
 
+function replayMatchesSession(replay, session) {
+  return !replay.session || replay.session === session;
+}
+
+function updateNextMatchAlert() {
+  const el = $('#player-next-alert');
+  if (!el || !state.search) {
+    if (el) el.hidden = true;
+    return;
+  }
+  const data = getSessionData();
+  if (!data?.drawn) {
+    el.hidden = true;
+    return;
+  }
+  const q = state.search.toLowerCase();
+  const next = getAllMatches(data)
+    .filter((m) => m.status === 'pending' && m.p1Id && m.p2Id)
+    .sort((a, b) => (PHASE_ORDER[a.phase] ?? 9) - (PHASE_ORDER[b.phase] ?? 9))
+    .find((m) => matchInvolvesName(m, data, state.search));
+
+  if (next) {
+    el.hidden = false;
+    el.textContent = `📣 下一場：${next.label || PHASE_LABELS[next.phase] || ''} · ${playerName(data, next.p1Id)} vs ${playerName(data, next.p2Id)}`;
+  } else {
+    el.hidden = true;
+  }
+}
+
 function renderReplays() {
   const list = $('#replay-list');
   const empty = $('#replay-empty');
-  let replays = state.replays;
+  let replays = state.replays.filter((r) => replayMatchesSession(r, state.session));
 
   if (state.search) {
     replays = replays.filter((r) => replayMatchesSearch(r, state.search));
@@ -276,6 +292,7 @@ function renderAll() {
   renderLive();
   renderSchedule();
   renderReplays();
+  updateNextMatchAlert();
 }
 
 function switchTab(tabId) {
@@ -310,15 +327,18 @@ async function pollTournament() {
   }
 }
 
-async function pollReplays() {
+async function pollReplays(options = {}) {
   try {
-    const r = await fetch(`/replay/index.json?since=${state.replayRevision}`, { cache: 'no-store' });
+    const since = options.full ? -1 : state.replayRevision;
+    const r = await fetch(`/replay/index.json?since=${since}`, { cache: 'no-store' });
     if (!r.ok) throw new Error(String(r.status));
     const data = await r.json();
-    if (typeof data.revision === 'number' && data.revision > state.replayRevision) {
+    if (Array.isArray(data.replays)) {
       state.replayRevision = data.revision;
-      state.replays = data.replays || [];
+      state.replays = data.replays;
       renderReplays();
+    } else if (typeof data.revision === 'number') {
+      state.replayRevision = Math.max(state.replayRevision, data.revision);
     }
   } catch {
     /* replay poll failure is non-fatal */
@@ -353,13 +373,20 @@ async function downloadReplayVideo(replay) {
 
 function playReplay(replayId) {
   const replay = state.replays.find((r) => r.id === replayId);
-  if (!replay) return;
+  if (!replay) {
+    pollReplays({ full: true }).then(() => {
+      const found = state.replays.find((r) => r.id === replayId);
+      if (found) playReplay(replayId);
+    });
+    return;
+  }
 
   state.activeReplayId = replayId;
   const player = $('#replay-player');
   const video = $('#replay-video');
   const title = $('#replay-player-title');
   const downloadBtn = $('#btn-replay-download');
+  const shareBtn = $('#btn-replay-share');
   const hasVideo = replay.hasVideo || replay.videoId;
 
   player.hidden = false;
@@ -373,11 +400,19 @@ function playReplay(replayId) {
       downloadBtn.hidden = false;
       downloadBtn.onclick = () => { downloadReplayVideo(replay).catch(console.error); };
     }
+    if (shareBtn) {
+      shareBtn.hidden = false;
+      shareBtn.onclick = async () => {
+        const url = `${location.origin}${location.pathname}?replay=${encodeURIComponent(replay.id)}`;
+        if (!(await copyTextToClipboard(url))) prompt('複製連結：', url);
+      };
+    }
   } else {
     video.removeAttribute('src');
     video.hidden = true;
     title.textContent += '（無影片）';
     if (downloadBtn) downloadBtn.hidden = true;
+    if (shareBtn) shareBtn.hidden = true;
   }
 
   renderReplays();
@@ -409,6 +444,11 @@ function initPlayerPortal() {
   pollReplays();
   setInterval(pollTournament, 1500);
   setInterval(pollReplays, 1500);
+
+  const replayParam = new URLSearchParams(location.search).get('replay');
+  if (replayParam) {
+    pollReplays({ full: true }).then(() => playReplay(replayParam));
+  }
 }
 
 document.addEventListener('DOMContentLoaded', initPlayerPortal);

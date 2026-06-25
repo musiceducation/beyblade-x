@@ -47,6 +47,7 @@ const state = {
   currentBattle: 1,
   matchOver: false,
   readyForNextRound: false,
+  finishHistory: [],
   cameraStream: null,
   cameraMode: 'local',
   cameraPeer: null,
@@ -110,6 +111,40 @@ function updateScoreDisplay() {
   if (typeof updateTournamentLiveScores === 'function') {
     updateTournamentLiveScores(state.scores, state.currentBattle);
   }
+  pushArenaLiveState();
+}
+
+let arenaLiveTimer = null;
+
+function buildArenaLivePayload() {
+  let matchLabel = null;
+  if (typeof tournamentState !== 'undefined' && tournamentState.activeMatchId && typeof findMatch === 'function') {
+    const match = findMatch(tournamentState.activeMatchId);
+    if (match) matchLabel = match.label || null;
+  }
+  return {
+    session: $('#session-select')?.value || 'junior',
+    phase: $('#phase-select')?.value || 'prelim',
+    p1Name: nameEls[0]?.value?.trim() || 'Blader 1',
+    p2Name: nameEls[1]?.value?.trim() || 'Blader 2',
+    scores: [...state.scores],
+    battle: state.currentBattle,
+    matchOver: state.matchOver,
+    matchLabel,
+    active: true,
+  };
+}
+
+function pushArenaLiveState() {
+  clearTimeout(arenaLiveTimer);
+  arenaLiveTimer = setTimeout(() => {
+    fetch('/arena/live.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildArenaLivePayload()),
+      cache: 'no-store',
+    }).catch(() => {});
+  }, 150);
 }
 
 function renderScoreTrack(container, score) {
@@ -136,6 +171,8 @@ function addLog(message, team = 'system', opts = {}) {
   const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   li.innerHTML = `<span class="log-time">${time}</span>${message}`;
   log.prepend(li);
+  renderBattleLogStats();
+  return li;
 }
 
 function escapeLogText(value) {
@@ -147,6 +184,46 @@ function escapeLogText(value) {
     .replace(/"/g, '&quot;');
 }
 
+function exportBattleLog() {
+  const items = [...($('#battle-log')?.querySelectorAll('li') || [])].reverse();
+  if (!items.length) {
+    showToast('戰報為空');
+    return;
+  }
+  const lines = items.map((li) => li.textContent?.trim()).filter(Boolean);
+  const stats = { spin: 0, burst: 0, over: 0, extreme: 0 };
+  lines.forEach((line) => {
+    if (line.includes('殘存')) stats.spin += 1;
+    if (line.includes('爆裂')) stats.burst += 1;
+    if (line.includes('擊飛')) stats.over += 1;
+    if (line.includes('極致')) stats.extreme += 1;
+  });
+  const header = `咩咩遊樂園 戰報\n${new Date().toLocaleString()}\n\n`;
+  const summary = `統計 — 殘存:${stats.spin} 爆裂:${stats.burst} 擊飛:${stats.over} 極致:${stats.extreme}\n\n`;
+  downloadBlob(
+    `beyblade-log-${Date.now()}.txt`,
+    new Blob([header + summary + lines.join('\n')], { type: 'text/plain;charset=utf-8' }),
+  );
+}
+
+function renderBattleLogStats() {
+  const el = $('#battle-log-stats');
+  if (!el) return;
+  const items = $('#battle-log')?.querySelectorAll('li') || [];
+  const stats = { spin: 0, burst: 0, over: 0, extreme: 0 };
+  items.forEach((li) => {
+    const t = li.textContent || '';
+    if (t.includes('殘存')) stats.spin += 1;
+    if (t.includes('爆裂')) stats.burst += 1;
+    if (t.includes('擊飛')) stats.over += 1;
+    if (t.includes('極致')) stats.extreme += 1;
+  });
+  const total = stats.spin + stats.burst + stats.over + stats.extreme;
+  el.textContent = total
+    ? `共 ${total} 次得分 · 殘存 ${stats.spin} · 爆裂 ${stats.burst} · 擊飛 ${stats.over} · 極致 ${stats.extreme}`
+    : '';
+}
+
 function showToast(text) {
   const toast = $('#finish-toast');
   $('#toast-text').textContent = text;
@@ -156,6 +233,7 @@ function showToast(text) {
     toast.classList.remove('show');
     setTimeout(() => { toast.hidden = true; }, 400);
   }, 2500);
+  renderBattleLogStats();
 }
 
 let finishAnnounceHideTimer = null;
@@ -201,6 +279,8 @@ function awardFinish(player, type) {
   const pts = FINISH_POINTS[type];
   const idx = player - 1;
   const name = nameEls[idx].value || `Blader ${player}`;
+  const scoresBefore = [...state.scores];
+  const matchOverBefore = state.matchOver;
 
   state.scores[idx] += pts;
   updateScoreDisplay();
@@ -222,10 +302,13 @@ function awardFinish(player, type) {
   }
 
   const label = finishLabel(type);
-  addLog(
+  const logEl = addLog(
     `第 ${state.currentBattle} 局 · <strong>${escapeLogText(name)}</strong> — ${label} <span class="log-points">+${pts}</span> · 比分 <span class="log-score">${state.scores[0]} : ${state.scores[1]}</span>`,
     player
   );
+  state.finishHistory.push({ player, type, pts, scoresBefore, matchOverBefore, logEl });
+  updateUndoButton();
+
   if (typeof onReplayFinish === 'function') {
     onReplayFinish(player, type, pts, state.scores);
   }
@@ -236,10 +319,54 @@ function awardFinish(player, type) {
 
   triggerFinishEffect(type, player);
   checkMatchEnd();
+  const lastEntry = state.finishHistory[state.finishHistory.length - 1];
+  if (lastEntry && state.matchOver) {
+    lastEntry.endedMatch = true;
+  }
   if (!state.matchOver) {
     state.readyForNextRound = true;
     updateNextRoundLaunchHint();
   }
+  updateUndoButton();
+}
+
+function undoLastFinish() {
+  if (state.matchOver) {
+    showToast('Match 已結束，無法撤銷得分');
+    return;
+  }
+
+  const entry = state.finishHistory.pop();
+  if (!entry) return;
+
+  if (entry.endedMatch) {
+    state.finishHistory.push(entry);
+    showToast('Match 已結束，無法撤銷得分');
+    return;
+  }
+
+  state.scores = [...entry.scoresBefore];
+  state.readyForNextRound = false;
+  updateScoreDisplay();
+  entry.logEl?.remove();
+  updateUndoButton();
+
+  if (typeof onReplayUndoFinish === 'function') {
+    onReplayUndoFinish(entry.player, entry.type, entry.pts);
+  }
+
+  addLog(`↩ 已撤銷 ${finishLabel(entry.type)}（P${entry.player} −${entry.pts}）`, 'system');
+  showToast('已撤銷上一個得分');
+}
+
+function updateUndoButton() {
+  const btn = $('#btn-undo-finish');
+  if (!btn) return;
+  const last = state.finishHistory[state.finishHistory.length - 1];
+  const canUndo = state.finishHistory.length > 0 && !state.matchOver && !last?.endedMatch;
+  btn.disabled = !canUndo;
+  btn.title = state.matchOver ? 'Match 已結束' : canUndo ? '撤銷上一個得分' : '尚無可撤銷的得分';
+  btn.setAttribute('aria-disabled', btn.disabled ? 'true' : 'false');
 }
 
 function checkMatchEnd() {
@@ -257,6 +384,8 @@ function nextBattle() {
     state.scores = [0, 0];
     state.currentBattle = 1;
     state.matchOver = false;
+    state.finishHistory = [];
+    updateUndoButton();
     $('#victory-overlay').hidden = true;
     updateScoreDisplay();
     addLog('— 新 Match 開始（分數歸零）—');
@@ -270,6 +399,8 @@ function nextBattle() {
   if (typeof onReplayBattleEnd === 'function') {
     onReplayBattleEnd([...state.scores], state.currentBattle);
   }
+  state.finishHistory = [];
+  updateUndoButton();
   state.readyForNextRound = false;
   state.currentBattle++;
   updateScoreDisplay();
@@ -323,6 +454,8 @@ function resetMatchScoresOnly(options = {}) {
   state.currentBattle = 1;
   state.matchOver = false;
   state.readyForNextRound = false;
+  state.finishHistory = [];
+  updateUndoButton();
   updateScoreDisplay();
   $('#victory-overlay').hidden = true;
   resetLaunchTimer(!keepLaunch);
@@ -332,6 +465,8 @@ function loadMatchScores(scores, battles, matchOver) {
   state.scores = [...scores];
   state.currentBattle = battles || 1;
   state.matchOver = !!matchOver;
+  state.finishHistory = [];
+  updateUndoButton();
   updateScoreDisplay();
   $('#victory-overlay').hidden = true;
   resetLaunchTimer();
@@ -344,6 +479,8 @@ function resetMatch(silent) {
   state.currentBattle = 1;
   state.matchOver = false;
   state.readyForNextRound = false;
+  state.finishHistory = [];
+  updateUndoButton();
   updateScoreDisplay();
   $('#victory-overlay').hidden = true;
   if (!silent) {
@@ -2393,6 +2530,7 @@ function init() {
   });
 
   $('#btn-next-battle').addEventListener('click', nextBattle);
+  $('#btn-undo-finish')?.addEventListener('click', undoLastFinish);
   $('#btn-reset-match').addEventListener('click', resetMatch);
   $('#btn-launch').addEventListener('click', startLaunchCountdown);
   $('#btn-relaunch').addEventListener('click', startLaunchCountdown);
@@ -2413,7 +2551,9 @@ function init() {
   });
   $('#btn-clear-log').addEventListener('click', () => {
     $('#battle-log').innerHTML = '';
+    renderBattleLogStats();
   });
+  $('#btn-export-log')?.addEventListener('click', exportBattleLog);
 
   $('#btn-cam-start').addEventListener('click', startCamera);
   $('#btn-cam-stop').addEventListener('click', () => stopCamera());
@@ -2484,6 +2624,13 @@ function init() {
     if (e.key === 'Escape' && (cameraLaunchActive || document.body.classList.contains('launch-active'))) {
       resetLaunchTimer();
     }
+    if ((e.key === 'z' || e.key === 'Z') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      const btn = $('#btn-undo-finish');
+      if (btn && !btn.disabled) {
+        e.preventDefault();
+        undoLastFinish();
+      }
+    }
   });
 
   document.addEventListener('fullscreenchange', () => {
@@ -2512,15 +2659,23 @@ function init() {
   updateScoreDisplay();
   $('#session-select').addEventListener('change', () => {
     addLog(`切換至 ${getSessionLabel()}`);
+    const overlayLink = $('#overlay-link');
+    if (overlayLink) overlayLink.href = `overlay.html?session=${$('#session-select').value}`;
+    pushArenaLiveState();
   });
   $('#phase-select').addEventListener('change', () => {
     addLog(`比賽階段：${getPhaseLabel()}`);
+    pushArenaLiveState();
+  });
+  nameEls.forEach((el) => {
+    el.addEventListener('input', pushArenaLiveState);
   });
 
   syncFinishButtons();
   initTournament();
   initReplay();
   initAppViews();
+  updateUndoButton();
   if (typeof initSupabaseSync === 'function') initSupabaseSync();
   $('#btn-copy-player-link')?.addEventListener('click', () => { copyPlayerLink().catch(console.error); });
   updatePlayerQrDisplay().catch(console.error);
@@ -2542,6 +2697,7 @@ function init() {
   });
   if (goShootAudio) goShootAudio.load();
   listCameras({ requestPermission: true });
+  pushArenaLiveState();
 }
 
 document.addEventListener('DOMContentLoaded', init);

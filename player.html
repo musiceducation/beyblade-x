@@ -32,6 +32,7 @@
   </nav>
 
   <main class="player-main">
+    <p id="player-next-alert" class="player-next-alert" hidden></p>
     <section id="tab-live" class="player-section active" aria-label="即時比分">
       <div id="live-active" class="live-active-card" hidden>
         <p class="live-label">進行中</p>
@@ -66,7 +67,10 @@
         <video id="replay-video" class="player-replay-video" controls playsinline></video>
         <div class="player-replay-footer">
           <p id="replay-player-title" class="player-replay-title"></p>
-          <button id="btn-replay-download" type="button" class="player-replay-download" hidden>下載影片</button>
+          <div class="player-replay-actions">
+            <button id="btn-replay-share" type="button" class="player-replay-download" hidden>分享</button>
+            <button id="btn-replay-download" type="button" class="player-replay-download" hidden>下載影片</button>
+          </div>
         </div>
       </div>
     </section>
@@ -76,6 +80,7 @@
     <p>請連接場內 Wi‑Fi · 首次需信任 HTTPS 憑證</p>
   </footer>
 
+  <script src="arena-shared.js"></script>
   <script src="player.js"></script>
 </body>
 </html>

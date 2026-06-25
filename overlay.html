@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>咩咩遊樂園 — OBS 投影</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="overlay.css">
+</head>
+<body>
+  <div class="overlay-root">
+    <header class="overlay-header">
+      <span id="overlay-session" class="overlay-session">低齡組</span>
+      <span id="overlay-phase" class="overlay-phase"></span>
+    </header>
+    <section id="overlay-live" class="overlay-live" hidden>
+      <p class="overlay-label">進行中</p>
+      <div class="overlay-scores">
+        <div class="overlay-player red">
+          <span id="overlay-p1-name">Blader 1</span>
+          <strong id="overlay-p1-score">0</strong>
+        </div>
+        <span class="overlay-vs">VS</span>
+        <div class="overlay-player blue">
+          <span id="overlay-p2-name">Blader 2</span>
+          <strong id="overlay-p2-score">0</strong>
+        </div>
+      </div>
+      <p id="overlay-battle" class="overlay-battle"></p>
+    </section>
+    <section id="overlay-next" class="overlay-next" hidden>
+      <p class="overlay-label">即將開始</p>
+      <p id="overlay-next-text" class="overlay-next-text"></p>
+    </section>
+    <p id="overlay-empty" class="overlay-empty">等待對戰…</p>
+  </div>
+  <script src="arena-shared.js"></script>
+  <script src="overlay.js"></script>
+</body>
+</html>

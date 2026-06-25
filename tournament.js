@@ -12,6 +12,7 @@ const tournamentSync = {
   revision: 0,
   applyingRemote: false,
   pushing: false,
+  pendingConflict: null,
   pollTimer: null,
   liveSyncTimer: null,
 };
@@ -91,6 +92,7 @@ function applySessionData(data) {
 function applyRemoteTournamentState(remote) {
   if (!remote || typeof remote.revision !== 'number') return false;
   if (remote.revision <= tournamentSync.revision) return false;
+  if (tournamentSync.pendingConflict) return false;
 
   tournamentSync.applyingRemote = true;
   tournamentSync.revision = remote.revision;
@@ -139,7 +141,9 @@ async function pushTournamentState() {
       return;
     }
     if (res.status === 409 && data.revision) {
-      applyRemoteTournamentState(data);
+      tournamentSync.pendingConflict = data;
+      showSyncConflictModal(data);
+      updateSyncIndicator('error');
     } else {
       updateSyncIndicator('error');
     }
@@ -150,8 +154,144 @@ async function pushTournamentState() {
   }
 }
 
+function showSyncConflictModal(remote) {
+  tournamentSync.pendingConflict = remote;
+  const modal = $('#sync-conflict-modal');
+  if (!modal) return;
+  modal.hidden = false;
+  modal.dataset.remoteRevision = String(remote.revision || '');
+}
+
+function hideSyncConflictModal() {
+  const modal = $('#sync-conflict-modal');
+  if (modal) modal.hidden = true;
+  tournamentSync.pendingConflict = null;
+}
+
+async function resolveSyncConflict(useRemote) {
+  const remote = tournamentSync.pendingConflict;
+  hideSyncConflictModal();
+  if (!remote) return;
+
+  if (useRemote) {
+    tournamentSync.revision = Math.max(0, (remote.revision || 1) - 1);
+    applyRemoteTournamentState(remote);
+    return;
+  }
+
+  try {
+    const payload = buildFullSyncPayload();
+    payload.force = true;
+    const res = await fetch('/tournament/state.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      cache: 'no-store',
+    });
+    const data = await res.json();
+    if (res.ok && data.ok) {
+      tournamentSync.revision = data.revision;
+      updateSyncIndicator('synced');
+      if (typeof pushTournamentPayloadToSupabase === 'function') {
+        const cloudPayload = buildFullSyncPayload();
+        cloudPayload.revision = data.revision;
+        pushTournamentPayloadToSupabase(cloudPayload).catch(console.error);
+      }
+    } else {
+      updateSyncIndicator('error');
+    }
+  } catch {
+    updateSyncIndicator('offline');
+  }
+}
+
+function exportTournamentCsv() {
+  const all = loadTournamentStorage();
+  const rows = [['場次', '階段', '對戰', '選手1', '選手2', '比分', '勝者', '狀態']];
+  ['junior', 'senior'].forEach((sessionKey) => {
+    const data = all[sessionKey];
+    if (!data?.matches?.prelim) return;
+    const sessionLabel = sessionKey === 'junior' ? '低齡組' : '高齡組';
+    getAllMatches(data).forEach((m) => {
+      const p1 = data.players?.find((p) => p.id === m.p1Id)?.name || '待定';
+      const p2 = data.players?.find((p) => p.id === m.p2Id)?.name || '待定';
+      const scores = m.status === 'done' ? m.scores : m.liveScores;
+      const scoreText = scores ? `${scores[0]}:${scores[1]}` : '';
+      const winner = m.winnerId === m.p1Id ? p1 : m.winnerId === m.p2Id ? p2 : '';
+      const status = m.status === 'done' ? '完畢' : m.id === data.activeMatchId ? '進行中' : '待賽';
+      rows.push([
+        sessionLabel,
+        m.label || PHASE_LABELS[m.phase] || m.phase,
+        m.id,
+        p1,
+        p2,
+        scoreText,
+        winner,
+        status,
+      ]);
+    });
+  });
+  const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+  downloadBlob(`beyblade-schedule-${Date.now()}.csv`, new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
+}
+
+function backupTournamentJson() {
+  const payload = buildFullSyncPayload();
+  payload.revision = tournamentSync.revision;
+  payload.exportedAt = new Date().toISOString();
+  downloadBlob(
+    `beyblade-backup-${Date.now()}.json`,
+    new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }),
+  );
+}
+
+async function restoreTournamentJson(file) {
+  if (!file) return;
+  const text = await file.text();
+  let payload;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    alert('無效的 JSON 檔');
+    return;
+  }
+  if (!payload.junior && !payload.senior) {
+    alert('備份格式不正確');
+    return;
+  }
+  if (!confirm('還原備份會覆蓋目前賽程，確定？')) return;
+  if (typeof confirmArenaPin === 'function' && !confirmArenaPin('還原賽程備份')) return;
+
+  const all = loadTournamentStorage();
+  if (payload.junior) all.junior = { ...createEmptySessionData(), ...payload.junior };
+  if (payload.senior) all.senior = { ...createEmptySessionData(), ...payload.senior };
+  saveTournamentStorage(all);
+  applySessionData(all[tournamentState.session] || createEmptySessionData());
+  advanceWinners();
+  renderTournamentUI();
+  if (tournamentSync.enabled) {
+    const pushPayload = buildFullSyncPayload();
+    pushPayload.force = true;
+    try {
+      const res = await fetch('/tournament/state.json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(pushPayload),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) tournamentSync.revision = data.revision;
+    } catch { /* local restore still applied */ }
+  }
+  addLog('已還原賽程備份');
+}
+
 async function pollTournamentState() {
   if (!tournamentSync.enabled) return;
+
+  if (tournamentSync.pendingConflict) {
+    tournamentSync.pollTimer = setTimeout(pollTournamentState, SYNC_POLL_MS);
+    return;
+  }
 
   try {
     const res = await fetch(`/tournament/state.json?since=${tournamentSync.revision}`, { cache: 'no-store' });
@@ -491,16 +631,7 @@ function advanceWinners() {
 const PHASE_ORDER = { prelim: 0, revival: 1, quarter: 2, challenge: 3, semi: 4, final: 5 };
 
 function getAllMatchesFlat() {
-  const m = tournamentState.matches;
-  if (!m.prelim) return [];
-  return [
-    ...m.prelim,
-    ...(m.quarter || []),
-    ...(m.revival || []),
-    ...(m.challenge ? [m.challenge] : []),
-    ...(m.semi || []),
-    ...(m.final ? [m.final] : []),
-  ];
+  return getAllMatches({ matches: tournamentState.matches });
 }
 
 function getReadyMatches() {
@@ -733,6 +864,7 @@ function runDraw() {
 
 function resetTournament() {
   if (!confirm('清除本場抽籤與賽程？（選手名單保留）')) return;
+  if (typeof confirmArenaPin === 'function' && !confirmArenaPin('重設賽程')) return;
   tournamentState.drawn = false;
   tournamentState.matches = {};
   tournamentState.eliminatedIds = [];
@@ -1176,5 +1308,15 @@ function initTournament() {
   });
 
   $('#btn-draw')?.addEventListener('click', runDraw);
+  $('#btn-export-csv')?.addEventListener('click', exportTournamentCsv);
+  $('#btn-backup-tournament')?.addEventListener('click', backupTournamentJson);
+  $('#btn-restore-tournament')?.addEventListener('click', () => $('#restore-tournament-file')?.click());
+  $('#restore-tournament-file')?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    restoreTournamentJson(file).catch(console.error);
+    e.target.value = '';
+  });
+  $('#btn-sync-use-remote')?.addEventListener('click', () => resolveSyncConflict(true));
+  $('#btn-sync-keep-local')?.addEventListener('click', () => resolveSyncConflict(false));
   $('#btn-reset-bracket')?.addEventListener('click', resetTournament);
 }

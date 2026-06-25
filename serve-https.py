@@ -62,6 +62,20 @@ REPLAY_STATE = {
 }
 REPLAY_LOCK = threading.Lock()
 
+ARENA_LIVE_STATE = {
+    'updatedAt': 0,
+    'session': 'junior',
+    'phase': 'prelim',
+    'p1Name': 'Blader 1',
+    'p2Name': 'Blader 2',
+    'scores': [0, 0],
+    'battle': 1,
+    'matchOver': False,
+    'matchLabel': None,
+    'active': False,
+}
+ARENA_LIVE_LOCK = threading.Lock()
+
 
 def ensure_replay_dir():
     os.makedirs(REPLAY_DIR, exist_ok=True)
@@ -381,6 +395,111 @@ def push_replay_video_to_cloud(replay_id, video_bytes):
 
     text = raw.decode('utf-8', errors='replace') if isinstance(raw, bytes) else str(raw)
     return False, f'arena_replays patch {status} {text}'
+
+
+def clear_all_local_replays():
+    with REPLAY_LOCK:
+        ids = [r.get('id') for r in REPLAY_STATE['replays'] if r.get('id')]
+        REPLAY_STATE['replays'] = []
+        REPLAY_STATE['revision'] += 1
+        REPLAY_STATE['updatedAt'] = int(time.time() * 1000)
+    save_replay_index()
+    for rid in ids:
+        delete_replay_files(rid)
+    return ids
+
+
+def clear_cloud_replays():
+    cfg = get_cloud_config()
+    if not cfg:
+        return False, 'cloud not configured', {'deletedRows': 0, 'deletedVideos': 0}
+
+    slug = cfg['eventSlug']
+    slug_q = urllib.parse.quote(slug, safe='')
+    deleted_videos = 0
+
+    while True:
+        status, raw = _supabase_request(
+            'POST',
+            '/storage/v1/object/list/replay-videos',
+            json.dumps({'prefix': f'{slug}/', 'limit': 1000}),
+        )
+        if not (status and 200 <= status < 300):
+            break
+        try:
+            items = json.loads(raw.decode())
+            prefixes = [f"{slug}/{item['name']}" for item in items if item.get('name')]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            break
+        if not prefixes:
+            break
+        del_status, _ = _supabase_request(
+            'DELETE',
+            '/storage/v1/object/replay-videos',
+            json.dumps({'prefixes': prefixes}),
+        )
+        if del_status and 200 <= del_status < 300:
+            deleted_videos += len(prefixes)
+        if len(prefixes) < 1000:
+            break
+
+    status, raw = _supabase_request(
+        'DELETE',
+        f'/rest/v1/arena_replays?event_slug=eq.{slug_q}',
+        content_type=None,
+        extra_headers={'Prefer': 'return=representation'},
+    )
+    deleted_rows = 0
+    if status and 200 <= status < 300:
+        try:
+            deleted_rows = len(json.loads(raw.decode() or '[]'))
+        except json.JSONDecodeError:
+            deleted_rows = 0
+        return True, None, {'deletedRows': deleted_rows, 'deletedVideos': deleted_videos}
+
+    text = raw.decode('utf-8', errors='replace') if isinstance(raw, bytes) else str(raw)
+    return False, f'arena_replays delete {status} {text}', {'deletedRows': 0, 'deletedVideos': deleted_videos}
+
+
+def delete_cloud_replay(replay_id):
+    cfg = get_cloud_config()
+    if not cfg or not replay_id:
+        return False, 'invalid replay', {'deletedVideo': False}
+
+    slug = cfg['eventSlug']
+    storage_path = f'{slug}/{replay_id}.webm'
+    _supabase_request(
+        'DELETE',
+        '/storage/v1/object/replay-videos',
+        json.dumps({'prefixes': [storage_path]}),
+    )
+
+    rid = urllib.parse.quote(replay_id, safe='')
+    status, raw = _supabase_request(
+        'DELETE',
+        f'/rest/v1/arena_replays?id=eq.{rid}',
+        content_type=None,
+    )
+    if status and 200 <= status < 300:
+        return True, None, {'deletedVideo': True}
+
+    text = raw.decode('utf-8', errors='replace') if isinstance(raw, bytes) else str(raw)
+    return False, f'arena_replays delete {status} {text}', {'deletedVideo': False}
+
+
+def delete_local_replay(replay_id):
+    if not replay_id or not re.fullmatch(r'r-[a-zA-Z0-9-]+', replay_id):
+        return False
+    with REPLAY_LOCK:
+        replays = REPLAY_STATE['replays']
+        idx = next((i for i, r in enumerate(replays) if r.get('id') == replay_id), -1)
+        if idx >= 0:
+            replays.pop(idx)
+            REPLAY_STATE['revision'] += 1
+            REPLAY_STATE['updatedAt'] = int(time.time() * 1000)
+    save_replay_index()
+    delete_replay_files(replay_id)
+    return True
 
 
 def find_binary(name, brew_paths=()):
@@ -728,6 +847,11 @@ class ArenaHandler(http.server.SimpleHTTPRequestHandler):
                     self._send_json(dict(TOURNAMENT_STATE))
             return
 
+        if path == '/arena/live.json':
+            with ARENA_LIVE_LOCK:
+                self._send_json(dict(ARENA_LIVE_STATE))
+            return
+
         if path == '/cloud/status.json':
             cfg = get_cloud_config()
             self._send_json({
@@ -810,6 +934,14 @@ class ArenaHandler(http.server.SimpleHTTPRequestHandler):
                 self._send_json({'ok': False, 'error': err}, 502)
             return
 
+        if path == '/cloud/replay/clear.json':
+            ok, err, stats = clear_cloud_replays()
+            if ok:
+                self._send_json({'ok': True, **stats})
+            else:
+                self._send_json({'ok': False, 'error': err, **stats}, 502)
+            return
+
         if path == '/cloud/replay/meta.json':
             raw = self._read_body()
             try:
@@ -823,6 +955,51 @@ class ArenaHandler(http.server.SimpleHTTPRequestHandler):
                 self._send_json({'ok': True, 'id': session.get('id')})
             else:
                 self._send_json({'ok': False, 'error': err}, 502)
+            return
+
+        if path == '/replay/clear.json':
+            ids = clear_all_local_replays()
+            self._send_json({'ok': True, 'deleted': len(ids)})
+            return
+
+        replay_delete = re.fullmatch(r'/replay/(r-[a-zA-Z0-9-]+)/delete\.json', path)
+        if replay_delete:
+            replay_id = replay_delete.group(1)
+            ok = delete_local_replay(replay_id)
+            self._send_json({'ok': ok, 'id': replay_id})
+            return
+
+        cloud_replay_delete = re.fullmatch(r'/cloud/replay/(r-[a-zA-Z0-9-]+)/delete\.json', path)
+        if cloud_replay_delete:
+            replay_id = cloud_replay_delete.group(1)
+            ok, err, stats = delete_cloud_replay(replay_id)
+            if ok:
+                self._send_json({'ok': True, 'id': replay_id, **stats})
+            else:
+                self._send_json({'ok': False, 'error': err, **stats}, 502)
+            return
+
+        if path == '/arena/live.json':
+            raw = self._read_body()
+            try:
+                payload = json.loads(raw.decode('utf-8') or '{}')
+            except json.JSONDecodeError:
+                self._send_json({'error': 'bad json'}, 400)
+                return
+            with ARENA_LIVE_LOCK:
+                for key in ('session', 'phase', 'p1Name', 'p2Name', 'matchLabel'):
+                    if key in payload:
+                        ARENA_LIVE_STATE[key] = payload[key]
+                if 'scores' in payload and isinstance(payload['scores'], list) and len(payload['scores']) >= 2:
+                    ARENA_LIVE_STATE['scores'] = [int(payload['scores'][0]), int(payload['scores'][1])]
+                if 'battle' in payload:
+                    ARENA_LIVE_STATE['battle'] = int(payload['battle'])
+                if 'matchOver' in payload:
+                    ARENA_LIVE_STATE['matchOver'] = bool(payload['matchOver'])
+                if 'active' in payload:
+                    ARENA_LIVE_STATE['active'] = bool(payload['active'])
+                ARENA_LIVE_STATE['updatedAt'] = int(time.time() * 1000)
+            self._send_json({'ok': True})
             return
 
         if path == '/tournament/state.json':
@@ -839,8 +1016,10 @@ class ArenaHandler(http.server.SimpleHTTPRequestHandler):
                 self._send_json({'error': 'missing revision'}, 400)
                 return
 
+            force = payload.get('force') is True
+
             with TOURNAMENT_LOCK:
-                if client_revision != TOURNAMENT_STATE['revision']:
+                if client_revision != TOURNAMENT_STATE['revision'] and not force:
                     self._send_json({
                         'ok': False,
                         'conflict': True,
@@ -959,6 +1138,7 @@ def main():
         print(f'  手機鏡頭：  選「手機/平板」→ 掃 QR')
         print(f'  多部裝置：  同一 Wi‑Fi 開啟相同網址，賽程自動同步')
         print(f'  選手查閱：  https://{lan}:{PORT}/player.html（掃 QR）')
+        print(f'  OBS 投影：  https://{lan}:{PORT}/overlay.html')
         print(f'  DJI Action/Pocket： rtmp://{lan}:{RTMP_PORT}/live/{DJI_STREAM_KEY}')
         print(f'')
     print('首次請在電腦與手機瀏覽器接受憑證警告。')

@@ -407,6 +407,95 @@ function recordReplayFinish(player, finishType, points, scores) {
   });
 }
 
+function onReplayUndoFinish(player, finishType, points) {
+  const session = replayState.session;
+  if (!session) return;
+  for (let i = session.events.length - 1; i >= 0; i--) {
+    const e = session.events[i];
+    if (e.type === 'finish' && e.player === player && e.finishType === finishType && e.points === points) {
+      session.events.splice(i, 1);
+      break;
+    }
+  }
+}
+
+function replayPublicLink(replay) {
+  const portal = typeof getPlayerPortalUrl === 'function' ? getPlayerPortalUrl() : null;
+  if (portal) return `${portal}?replay=${encodeURIComponent(replay.id)}`;
+  const base = location.origin + location.pathname.replace(/[^/]*$/, '');
+  return `${base}player.html?replay=${encodeURIComponent(replay.id)}`;
+}
+
+async function shareReplayLink(replay) {
+  const url = replayPublicLink(replay);
+  if (await copyTextToClipboard(url)) {
+    if (typeof showToast === 'function') showToast('回放連結已複製');
+    return;
+  }
+  prompt('複製回放連結：', url);
+}
+
+async function postReplayDelete(id) {
+  try {
+    await fetch(`/replay/${encodeURIComponent(id)}/delete.json`, { method: 'POST' });
+  } catch (err) {
+    console.warn('Server replay delete failed', err);
+  }
+
+  if (typeof isSupabaseSyncEnabled === 'function' && isSupabaseSyncEnabled()) {
+    try {
+      await fetch(`/cloud/replay/${encodeURIComponent(id)}/delete.json`, { method: 'POST' });
+    } catch (err) {
+      console.warn('Cloud replay delete failed', err);
+    }
+  }
+}
+
+async function deleteReplayById(id) {
+  if (!id) return;
+  if (!confirm('刪除此局回放？')) return;
+
+  if (replayState.playback?.replay?.id === id) stopReplayPlayback();
+
+  const idx = replayState.replays.findIndex((r) => r.id === id);
+  if (idx >= 0) {
+    const replay = replayState.replays[idx];
+    if (replay.videoId) await deleteReplayVideo(replay.videoId).catch(() => {});
+    replayState.replays.splice(idx, 1);
+    saveReplayList();
+    renderReplayList();
+  }
+
+  await postReplayDelete(id);
+}
+
+async function syncReplayListFromServer() {
+  try {
+    const res = await fetch('/replay/index.json?since=-1', { cache: 'no-store' });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!Array.isArray(data.replays)) return;
+    replayState.replays = data.replays;
+    saveReplayList();
+    renderReplayList();
+  } catch (err) {
+    console.warn('Replay list sync failed', err);
+  }
+}
+
+async function downloadReplayMatch(groupId) {
+  const rounds = replayState.replays
+    .filter((r) => (r.matchGroupId || r.id) === groupId)
+    .sort((a, b) => a.battleNum - b.battleNum);
+  for (const r of rounds) {
+    if (!replayHasVideo(r)) continue;
+    const url = await loadReplayVideoUrl(r);
+    if (url) await downloadReplayVideo(r, url);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  if (typeof showToast === 'function') showToast(`已下載 ${rounds.filter(replayHasVideo).length} 段影片`);
+}
+
 async function finalizeReplaySession(session, finalScores, options = {}) {
   if (!session) return;
 
@@ -651,8 +740,12 @@ function renderReplayList() {
       const chips = replayFinishChips(r.events);
       const active = replayState.playback?.replay?.id === r.id ? ' is-active' : '';
       const videoBadge = r.videoId ? '<span class="replay-item-video">影片</span>' : '';
+      const thumb = replayHasVideo(r)
+        ? `<video class="replay-item-thumb" preload="metadata" muted playsinline src="${replayServerVideoUrl(r)}#t=0.3"></video>`
+        : '';
       return `
         <li class="replay-round-item${active}" data-id="${r.id}">
+          ${thumb}
           <button type="button" class="replay-item-btn">
             <span class="replay-item-badge">B${r.battleNum}</span>
             <span class="replay-item-row">
@@ -663,6 +756,7 @@ function renderReplayList() {
             <span class="replay-item-chips">${chips || '<span class="replay-item-meta">無得分</span>'}</span>
             <span class="replay-item-time">${formatReplayTime(r.createdAt)}</span>
           </button>
+          <button type="button" class="btn btn-sm btn-ghost btn-replay-delete" data-id="${r.id}" title="刪除此局">✕</button>
         </li>`;
     }).join('');
 
@@ -672,6 +766,7 @@ function renderReplayList() {
           <span class="replay-match-title">${escapeReplayText(summary.p1Name)} vs ${escapeReplayText(summary.p2Name)}</span>
           <div class="replay-match-actions">
             <button type="button" class="btn btn-sm btn-ghost btn-replay-match-play" data-group-id="${groupId}">▶ 整場回放</button>
+            <button type="button" class="btn btn-sm btn-ghost btn-replay-match-download" data-group-id="${groupId}">⬇ 整場</button>
           </div>
           <span class="replay-match-meta">
             <span>共 ${summary.roundCount} 局 · 總分 ${summary.total[0]} : ${summary.total[1]}</span>
@@ -941,6 +1036,8 @@ async function openReplayPlayer(id, options = {}) {
   const progress = $('#replay-player-progress');
   const video = $('#replay-video');
   const downloadBtn = $('#btn-replay-download');
+  const shareBtn = $('#btn-replay-share');
+  const matchDlBtn = $('#btn-replay-download-match');
   const delta = replayBattleDelta(replay);
   const total = replay.finalScores || [0, 0];
 
@@ -962,9 +1059,21 @@ async function openReplayPlayer(id, options = {}) {
     video.hidden = false;
     downloadBtn.hidden = false;
     downloadBtn.onclick = () => { downloadReplayVideo(replay, videoUrl).catch(console.error); };
+    if (shareBtn) {
+      shareBtn.hidden = false;
+      shareBtn.onclick = () => { shareReplayLink(replay).catch(console.error); };
+    }
+    if (matchDlBtn) {
+      matchDlBtn.hidden = rounds.length <= 1;
+      matchDlBtn.onclick = () => {
+        downloadReplayMatch(replay.matchGroupId || replay.id).catch(console.error);
+      };
+    }
   } else if (video) {
     video.hidden = true;
     downloadBtn.hidden = true;
+    if (shareBtn) shareBtn.hidden = true;
+    if (matchDlBtn) matchDlBtn.hidden = true;
   }
 
   replayState.playback = { replay, rounds, videoUrl, timers: [], cancelled: false };
@@ -1115,25 +1224,73 @@ async function playReplayMatch() {
 }
 
 async function clearAllReplays() {
-  if (!replayState.replays.length) return;
-  if (!confirm('清除全部戰鬥回放？影片也會一併刪除。')) return;
+  const hasLocal = replayState.replays.length > 0;
+  const msg = hasLocal
+    ? '清除全部戰鬥回放？本機、伺服器及雲端影片也會一併刪除。'
+    : '本機無回放。是否清除伺服器及雲端上的舊回放？';
+  if (!confirm(msg)) return;
+  if (typeof confirmArenaPin === 'function' && !confirmArenaPin('清除全部回放')) return;
+
   stopReplayPlayback();
   discardReplaySession();
   resetMatchGroup();
+
   const ids = replayState.replays.filter((r) => r.videoId).map((r) => r.videoId);
   replayState.replays = [];
   saveReplayList();
   renderReplayList();
   await Promise.all(ids.map((id) => deleteReplayVideo(id).catch(() => {})));
+
+  try {
+    const res = await fetch('/replay/clear.json', { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) throw new Error(data.error || `server clear ${res.status}`);
+  } catch (err) {
+    console.warn('Server replay clear failed', err);
+    if (typeof showToast === 'function') showToast('伺服器回放清除失敗');
+  }
+
+  try {
+    const res = await fetch('/cloud/replay/clear.json', { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      if (data.error !== 'cloud not configured') {
+        throw new Error(data.error || `cloud clear ${res.status}`);
+      }
+    } else if (typeof showToast === 'function') {
+      showToast(`雲端回放已清除（${data.deletedRows ?? 0} 筆）`);
+    }
+  } catch (err) {
+    console.warn('Cloud replay clear failed', err);
+    if (typeof showToast === 'function') showToast('雲端回放清除失敗');
+  }
+
+  updateReplaySyncStatus();
 }
 
 function initReplay() {
   loadReplayList();
   renderReplayList();
+  syncReplayListFromServer();
   updateReplaySyncStatus();
   retryPendingReplayUploads();
 
   $('#replay-list')?.addEventListener('click', (e) => {
+    const delBtn = e.target.closest('.btn-replay-delete');
+    if (delBtn?.dataset.id) {
+      e.preventDefault();
+      e.stopPropagation();
+      deleteReplayById(delBtn.dataset.id).catch(console.error);
+      return;
+    }
+
+    const matchDlBtn = e.target.closest('.btn-replay-match-download');
+    if (matchDlBtn?.dataset.groupId) {
+      e.preventDefault();
+      downloadReplayMatch(matchDlBtn.dataset.groupId).catch(console.error);
+      return;
+    }
+
     const playMatchBtn = e.target.closest('.btn-replay-match-play');
     if (playMatchBtn?.dataset.groupId) {
       e.preventDefault();
@@ -1141,9 +1298,11 @@ function initReplay() {
       return;
     }
 
+    const roundBtn = e.target.closest('.replay-item-btn');
     const round = e.target.closest('.replay-round-item');
-    if (round?.dataset.id) {
-      openReplayPlayer(round.dataset.id).catch(console.error);
+    const replayId = round?.dataset.id;
+    if (replayId && (roundBtn || (round && !e.target.closest('.btn-replay-delete')))) {
+      openReplayPlayer(replayId).catch(console.error);
     }
   });
 
@@ -1166,6 +1325,11 @@ function initReplay() {
   $('#btn-replay-close')?.addEventListener('click', stopReplayPlayback);
   $('#btn-replay-theater-stop')?.addEventListener('click', () => stopReplayPlayback({ keepPanel: true }));
   $('#btn-clear-replays')?.addEventListener('click', clearAllReplays);
+
+  const replayParam = new URLSearchParams(location.search).get('replay');
+  if (replayParam) {
+    syncReplayListFromServer().then(() => openReplayPlayer(replayParam)).catch(console.error);
+  }
 }
 
 function onReplayBattleStart() {

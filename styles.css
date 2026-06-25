@@ -838,6 +838,19 @@ body.launch-active.launch-live .vs-center #btn-next-battle {
   display: none;
 }
 
+body.launch-active.launch-live .vs-center #btn-undo-finish {
+  display: inline-flex;
+  pointer-events: auto;
+  font-size: 0.72rem;
+  padding: 0.28rem 0.6rem;
+  margin-left: 0.15rem;
+}
+
+body.launch-active.launch-live .vs-center #btn-undo-finish:disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
 body.launch-active.launch-live .player-card {
   position: fixed;
   bottom: max(0.75rem, env(safe-area-inset-bottom));
@@ -2236,6 +2249,80 @@ body.launch-active #camera-feed-img.mirrored {
   padding: 0.35rem;
   display: flex;
   flex-direction: column;
+  gap: 0.35rem;
+}
+
+.replay-round-item {
+  display: flex;
+  align-items: stretch;
+  gap: 0.35rem;
+}
+
+.replay-round-item .replay-item-btn {
+  flex: 1;
+  min-width: 0;
+}
+
+.replay-item-thumb {
+  width: 56px;
+  height: 42px;
+  object-fit: cover;
+  border-radius: 6px;
+  background: #000;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.btn-replay-delete {
+  align-self: center;
+  padding: 0.25rem 0.45rem;
+  opacity: 0.65;
+}
+
+.btn-replay-delete:hover { opacity: 1; }
+
+.sync-conflict-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sync-conflict-modal[hidden] { display: none; }
+
+.sync-conflict-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+}
+
+.sync-conflict-card {
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  max-width: 360px;
+  width: calc(100% - 2rem);
+}
+
+.sync-conflict-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.battle-log-stats {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.panel-header-actions {
+  display: flex;
   gap: 0.35rem;
 }
 

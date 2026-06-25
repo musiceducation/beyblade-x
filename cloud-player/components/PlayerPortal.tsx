@@ -11,7 +11,8 @@ import {
   SESSION_LABELS,
   SessionData,
 } from '@/lib/constants';
-import { getEventSlug, getSupabase, replayVideoUrl } from '@/lib/supabase';
+import { getEventSlug, getSupabase } from '@/lib/supabase';
+import ReplayTab from '@/components/ReplayTab';
 
 type Tab = 'live' | 'schedule' | 'replay';
 
@@ -49,61 +50,6 @@ function formatMatchScore(match: Match) {
   return `${scores[0]} : ${scores[1]}`;
 }
 
-function replayDownloadFilename(meta: { p1Name?: string; p2Name?: string; battleNum?: number }) {
-  const safe = (s?: string) => (s || 'player').replace(/[^\w\u4e00-\u9fff-]+/g, '-').replace(/^-|-$/g, '') || 'player';
-  return `beyblade-${safe(meta.p1Name)}-vs-${safe(meta.p2Name)}-b${meta.battleNum ?? 0}.webm`;
-}
-
-async function downloadCloudReplay(
-  replay: ArenaReplayRow,
-  meta?: { p1Name?: string; p2Name?: string; battleNum?: number },
-  onStatus?: (status: 'idle' | 'downloading') => void,
-) {
-  const videoUrl = replayVideoUrl(replay.id);
-  if (!videoUrl) return;
-  const filename = replayDownloadFilename({
-    ...meta,
-    battleNum: meta?.battleNum ?? replay.battle_num ?? 0,
-  });
-  onStatus?.('downloading');
-  try {
-    const res = await fetch(videoUrl, { cache: 'no-store' });
-    if (!res.ok) throw new Error(`download ${res.status}`);
-    const blobUrl = URL.createObjectURL(await res.blob());
-    const a = document.createElement('a');
-    a.href = blobUrl;
-    a.download = filename;
-    a.rel = 'noopener';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(blobUrl);
-  } catch (err) {
-    console.warn('Replay download failed', err);
-    window.open(videoUrl, '_blank', 'noopener');
-  } finally {
-    onStatus?.('idle');
-  }
-}
-
-function groupReplays(replays: ArenaReplayRow[]) {
-  const map = new Map<string, ArenaReplayRow[]>();
-  replays.forEach((r) => {
-    const gid = r.match_group_id || r.id;
-    if (!map.has(gid)) map.set(gid, []);
-    map.get(gid)!.push(r);
-  });
-  return [...map.values()]
-    .map((rounds) =>
-      rounds.sort(
-        (a, b) =>
-          (a.battle_num || 0) - (b.battle_num || 0)
-          || a.created_at.localeCompare(b.created_at),
-      ),
-    )
-    .sort((a, b) => b[0]?.created_at.localeCompare(a[0]?.created_at || '') || 0);
-}
-
 export default function PlayerPortal() {
   const [tab, setTab] = useState<Tab>('live');
   const [session, setSession] = useState('junior');
@@ -115,7 +61,15 @@ export default function PlayerPortal() {
   const [replays, setReplays] = useState<ArenaReplayRow[]>([]);
   const [activeReplayId, setActiveReplayId] = useState<string | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
-  const [downloadStatus, setDownloadStatus] = useState<'idle' | 'downloading'>('idle');
+
+  const selectReplay = useCallback((id: string | null) => {
+    setActiveReplayId(id);
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (id) url.searchParams.set('replay', id);
+    else url.searchParams.delete('replay');
+    window.history.replaceState({}, '', url);
+  }, []);
 
   const poll = useCallback(async () => {
     const supabase = getSupabase();
@@ -158,6 +112,15 @@ export default function PlayerPortal() {
     return () => clearInterval(id);
   }, [poll]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const replayId = new URLSearchParams(window.location.search).get('replay');
+    if (replayId) {
+      setActiveReplayId(replayId);
+      setTab('replay');
+    }
+  }, []);
+
   const sessionData = arenaState?.[session as 'junior' | 'senior'] || null;
   const matches = getAllMatches(sessionData);
   const active = matches.find((m) => m.id === sessionData?.activeMatchId);
@@ -180,24 +143,24 @@ export default function PlayerPortal() {
     ? Math.round((doneCount / allWithPlayers.length) * 100)
     : 0;
 
-  const filteredReplays = search
-    ? replays.filter((r) => {
-        const meta = r.metadata as { p1Name?: string; p2Name?: string };
-        const q = search.toLowerCase();
-        return (
-          (meta.p1Name || '').toLowerCase().includes(q)
-          || (meta.p2Name || '').toLowerCase().includes(q)
-        );
-      })
-    : replays;
+  const filteredReplays = replays.filter((r) => {
+    const meta = r.metadata as { session?: string; p1Name?: string; p2Name?: string };
+    if (meta.session && meta.session !== session) return false;
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      (meta.p1Name || '').toLowerCase().includes(q)
+      || (meta.p2Name || '').toLowerCase().includes(q)
+    );
+  });
+  const replayTabCount = filteredReplays.length;
 
-  const replayGroups = groupReplays(filteredReplays);
-  const activeReplay = replays.find((r) => r.id === activeReplayId);
-  const activeMeta = activeReplay?.metadata as {
-    p1Name?: string;
-    p2Name?: string;
-    battleNum?: number;
-  } | undefined;
+  const nextForSearch = search
+    ? matches
+      .filter((m) => m.status === 'pending' && m.p1Id && m.p2Id)
+      .sort((a, b) => (PHASE_ORDER[a.phase] ?? 9) - (PHASE_ORDER[b.phase] ?? 9))
+      .find((m) => matchInvolvesName(m, sessionData, search))
+    : null;
 
   return (
     <>
@@ -237,11 +200,20 @@ export default function PlayerPortal() {
             onClick={() => setTab(t)}
           >
             {t === 'live' ? '即時' : t === 'schedule' ? '賽程' : '回放'}
+            {t === 'replay' && replayTabCount > 0 && (
+              <span className="player-tab-badge">{replayTabCount}</span>
+            )}
           </button>
         ))}
       </nav>
 
       <main className="player-main">
+        {nextForSearch && (
+          <p className="player-next-alert">
+            📣 {search} — 下一場：{nextForSearch.label || PHASE_LABELS[nextForSearch.phase] || ''} ·{' '}
+            {playerName(sessionData, nextForSearch.p1Id)} vs {playerName(sessionData, nextForSearch.p2Id)}
+          </p>
+        )}
         {tab === 'live' && (
           <section className="player-section" aria-label="即時比分">
             {active && active.p1Id && active.p2Id ? (
@@ -365,91 +337,13 @@ export default function PlayerPortal() {
         )}
 
         {tab === 'replay' && (
-          <section className="player-section" aria-label="戰鬥回放">
-            {replayGroups.length === 0 ? (
-              <p className="player-empty">{search ? '找不到相關回放' : '尚無回放'}</p>
-            ) : (
-              <div className="player-replay-list">
-                {replayGroups.map((rounds) => {
-                  const last = rounds[rounds.length - 1];
-                  const meta = last.metadata as {
-                    p1Name?: string;
-                    p2Name?: string;
-                    finalScores?: number[];
-                  };
-                  const total = meta.finalScores || [0, 0];
-                  return (
-                    <div key={last.match_group_id || last.id} className="replay-group">
-                      <div className="replay-group-head">
-                        {meta.p1Name || 'Blader 1'} vs {meta.p2Name || 'Blader 2'}
-                        <span className="replay-group-meta">
-                          共 {rounds.length} 局 · 總分 {total[0]}:{total[1]}
-                        </span>
-                      </div>
-                      {rounds.map((r) => {
-                        const m = r.metadata as {
-                          startScores?: number[];
-                          finalScores?: number[];
-                        };
-                        const delta = [
-                          (m.finalScores?.[0] ?? 0) - (m.startScores?.[0] ?? 0),
-                          (m.finalScores?.[1] ?? 0) - (m.startScores?.[1] ?? 0),
-                        ];
-                        return (
-                          <button
-                            key={r.id}
-                            type="button"
-                            className={`replay-round-btn${activeReplayId === r.id ? ' active' : ''}`}
-                            onClick={() => {
-                              setActiveReplayId(r.id);
-                              setTab('replay');
-                            }}
-                          >
-                            <span>
-                              第 {r.battle_num} 局 · +{delta[0]}:+{delta[1]}
-                              {r.has_video && <span className="has-video">影片</span>}
-                            </span>
-                            <span className="schedule-score-badge">
-                              {m.finalScores?.[0] ?? 0}:{m.finalScores?.[1] ?? 0}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            {activeReplay && (
-              <div className="player-replay-player">
-                {activeReplay.has_video ? (
-                  <video
-                    key={activeReplay.id}
-                    className="player-replay-video"
-                    controls
-                    playsInline
-                    src={replayVideoUrl(activeReplay.id) || undefined}
-                  />
-                ) : null}
-                <div className="player-replay-footer">
-                  <p className="player-replay-title">
-                    {activeMeta?.p1Name} vs {activeMeta?.p2Name} · 第 {activeMeta?.battleNum} 局
-                    {!activeReplay.has_video ? '（無影片）' : ''}
-                  </p>
-                  {activeReplay.has_video ? (
-                    <button
-                      type="button"
-                      className="player-replay-download"
-                      disabled={downloadStatus === 'downloading'}
-                      onClick={() => downloadCloudReplay(activeReplay, activeMeta, setDownloadStatus)}
-                    >
-                      {downloadStatus === 'downloading' ? '下載中…' : '下載影片'}
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            )}
-          </section>
+          <ReplayTab
+            replays={replays}
+            session={session}
+            search={search}
+            activeReplayId={activeReplayId}
+            onSelectReplay={selectReplay}
+          />
         )}
       </main>
 
