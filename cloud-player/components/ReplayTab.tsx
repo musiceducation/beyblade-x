@@ -17,6 +17,7 @@ import {
   replayMeta,
   downloadCloudReplay,
 } from '@/lib/replay';
+import { filterReplaysBySession } from '@/lib/tournament';
 import { replayVideoUrl } from '@/lib/supabase';
 
 type Props = {
@@ -63,18 +64,10 @@ export default function ReplayTab({
   const [shareCopied, setShareCopied] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
 
-  const filteredReplays = useMemo(() => {
-    return replays.filter((r) => {
-      const meta = replayMeta(r);
-      if (meta.session && meta.session !== session) return false;
-      if (!search) return true;
-      const q = search.toLowerCase();
-      return (
-        (meta.p1Name || '').toLowerCase().includes(q)
-        || (meta.p2Name || '').toLowerCase().includes(q)
-      );
-    });
-  }, [replays, session, search]);
+  const filteredReplays = useMemo(
+    () => filterReplaysBySession(replays, session, search),
+    [replays, session, search],
+  );
 
   const replayGroups = useMemo(() => groupReplays(filteredReplays), [filteredReplays]);
   const videoCount = filteredReplays.filter((r) => r.has_video).length;
@@ -118,7 +111,7 @@ export default function ReplayTab({
   if (!replayGroups.length) {
     return (
       <section className="player-section" aria-label="戰鬥回放">
-        <div className="player-empty replay-empty-state">
+        <div className="portal-empty replay-empty-state">
           <span className="replay-empty-icon" aria-hidden="true">🎬</span>
           <p>{search ? '找不到相關回放' : '尚無回放'}</p>
           <p className="replay-empty-hint">比賽結束後會由場內主機自動上傳</p>
