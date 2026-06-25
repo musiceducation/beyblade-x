@@ -406,7 +406,13 @@ function stopBeyScanLoop() {
   setBeyScanStatus('陀螺掃描已關閉');
 }
 
+function isBeyScanUiHidden() {
+  const bar = beyScan$('#bey-scan-bar');
+  return !bar || bar.hidden;
+}
+
 function setBeyScanEnabled(on) {
+  if (on && isBeyScanUiHidden()) on = false;
   beyScanState.enabled = !!on;
   sessionStorage.setItem('bex-bey-scan', on ? '1' : '0');
   const viewport = beyScan$('#camera-viewport');
@@ -437,7 +443,7 @@ function onCameraFeedStopped() {
 function initBeyScan() {
   beyScanState.statusEl = beyScan$('#bey-scan-status');
   const toggle = beyScan$('#bey-scan-toggle');
-  const saved = sessionStorage.getItem('bex-bey-scan') === '1';
+  const saved = !isBeyScanUiHidden() && sessionStorage.getItem('bex-bey-scan') === '1';
   if (toggle) toggle.checked = saved;
   setBeyScanEnabled(saved);
 

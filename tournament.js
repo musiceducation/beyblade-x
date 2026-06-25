@@ -211,7 +211,7 @@ function exportTournamentCsv() {
   ['junior', 'senior'].forEach((sessionKey) => {
     const data = all[sessionKey];
     if (!data?.matches?.prelim) return;
-    const sessionLabel = sessionKey === 'junior' ? '低齡組' : '高齡組';
+    const sessionLabel = sessionKey === 'junior' ? '親子組' : '公開組';
     getAllMatches(data).forEach((m) => {
       const p1 = data.players?.find((p) => p.id === m.p1Id)?.name || '待定';
       const p2 = data.players?.find((p) => p.id === m.p2Id)?.name || '待定';
@@ -916,7 +916,7 @@ function exportPrintableBracket() {
   ['junior', 'senior'].forEach((sk) => {
     const data = all[sk];
     if (!data?.drawn) return;
-    const label = sk === 'junior' ? '低齡組' : '高齡組';
+    const label = sk === 'junior' ? '親子組' : '公開組';
     rows.push(`<h2>${label}</h2><table><thead><tr><th>場次</th><th>對戰</th><th>比分</th><th>勝者</th></tr></thead><tbody>`);
     getAllMatches(data).forEach((m) => {
       const p1 = data.players?.find((p) => p.id === m.p1Id)?.name || '—';
@@ -943,7 +943,7 @@ function exportStatsReport() {
   ['junior', 'senior'].forEach((sk) => {
     const data = all[sk];
     if (!data?.players?.length) return;
-    lines.push(sk === 'junior' ? '【低齡組】' : '【高齡組】');
+    lines.push(sk === 'junior' ? '【親子組】' : '【公開組】');
     const stats = new Map(data.players.map((p) => [p.id, { name: p.name, w: 0, l: 0 }]));
     getAllMatches(data).forEach((m) => {
       if (m.status !== 'done' || !m.winnerId) return;
@@ -970,7 +970,7 @@ function exportAwardsList() {
     const runner = fin.winnerId === fin.p1Id ? playerNameFromData(data, fin.p2Id) : playerNameFromData(data, fin.p1Id);
     const semis = (data.matches.semi || []).map((m) => m.winnerId).filter(Boolean);
     const top4 = [...new Set([...semis, fin.p1Id, fin.p2Id].filter(Boolean))];
-    lines.push(sk === 'junior' ? '【低齡組】' : '【高齡組】');
+    lines.push(sk === 'junior' ? '【親子組】' : '【公開組】');
     lines.push(`冠軍：${champ}`);
     lines.push(`亞軍：${runner}`);
     lines.push(`四強：${top4.map((id) => playerNameFromData(data, id)).join('、')}`);

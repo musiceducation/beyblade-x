@@ -15,8 +15,8 @@ const PHASE_LABELS = {
 };
 
 const SESSION_LABELS = {
-  junior: '第一場 低齡組（6–12歲）',
-  senior: '第二場 高齡組（12歲+）',
+  junior: '第一場 親子組（6–12歲）',
+  senior: '第二場 公開組（12歲+）',
 };
 
 const MATCH_TARGET_KEY = 'bex-match-target';
@@ -645,7 +645,9 @@ function pauseCompetitionBackground() {
 function resumeCompetitionBackground() {
   if (!competitionScanPaused || typeof setBeyScanEnabled !== 'function') return;
   competitionScanPaused = false;
-  if (isCompetitionMode()) setBeyScanEnabled(true);
+  if (isCompetitionMode() && typeof isBeyScanUiHidden === 'function' && !isBeyScanUiHidden()) {
+    setBeyScanEnabled(true);
+  }
 }
 
 async function warmCompetitionAssets() {

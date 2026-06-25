@@ -61,8 +61,8 @@
     </div>
     <div class="header-controls">
       <select id="session-select" class="session-select" aria-label="比賽場次">
-        <option value="junior">第一場 低齡組（6–12歲）15:00</option>
-        <option value="senior">第二場 高齡組（12歲+）16:30</option>
+        <option value="junior">第一場 親子組（6–12歲）15:00</option>
+        <option value="senior">第二場 公開組（12歲+）16:30</option>
       </select>
       <select id="phase-select" class="session-select" aria-label="比賽階段">
         <option value="prelim">初賽</option>
@@ -356,7 +356,7 @@
             <span class="rec-dot"></span> LIVE
           </div>
         </div>
-        <div class="bey-scan-bar">
+        <div id="bey-scan-bar" class="bey-scan-bar" hidden>
           <div class="bey-scan-bar-top">
             <label class="toggle bey-scan-toggle">
               <input type="checkbox" id="bey-scan-toggle"> 陀螺掃描

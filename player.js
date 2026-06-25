@@ -16,8 +16,8 @@ const PHASE_LABELS = {
 const PHASE_ORDER = { prelim: 0, revival: 1, quarter: 2, challenge: 3, semi: 4, final: 5 };
 
 const SESSION_LABELS = {
-  junior: '第一場 低齡組',
-  senior: '第二場 高齡組',
+  junior: '第一場 親子組',
+  senior: '第二場 公開組',
 };
 
 const state = {
