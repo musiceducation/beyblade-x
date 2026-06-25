@@ -22,6 +22,7 @@ const replayState = {
   db: null,
   finalizeChain: Promise.resolve(),
   serverUploadPending: 0,
+  recordingPaused: sessionStorage.getItem('bex-replay-paused') === '1',
 };
 
 function updateReplaySyncStatus() {
@@ -51,6 +52,7 @@ function updateReplaySyncStatus() {
     el.textContent = '';
     el.dataset.status = 'idle';
   }
+  if (typeof updateArenaSyncBanner === 'function') updateArenaSyncBanner();
 }
 
 async function uploadReplayMetadata(session) {
@@ -305,7 +307,23 @@ function stopReplayRecording(discard = false) {
   });
 }
 
+function updateReplayPauseUi() {
+  const btn = $('#btn-replay-pause-upload');
+  if (!btn) return;
+  btn.textContent = replayState.recordingPaused ? '▶ 恢復錄製上傳' : '⏸ 暫停錄製上傳';
+  btn.classList.toggle('active', replayState.recordingPaused);
+  btn.setAttribute('aria-pressed', replayState.recordingPaused ? 'true' : 'false');
+}
+
+function setReplayRecordingPaused(paused) {
+  replayState.recordingPaused = paused;
+  sessionStorage.setItem('bex-replay-paused', paused ? '1' : '0');
+  updateReplayPauseUi();
+  if (typeof updateArenaSyncBanner === 'function') updateArenaSyncBanner();
+}
+
 function startReplayRecording(sessionId) {
+  if (replayState.recordingPaused) return;
   if (replayState.recorder && replayState.recordingSessionId === sessionId) return;
 
   const startNew = () => {
@@ -1326,6 +1344,10 @@ function initReplay() {
   $('#btn-replay-close')?.addEventListener('click', stopReplayPlayback);
   $('#btn-replay-theater-stop')?.addEventListener('click', () => stopReplayPlayback({ keepPanel: true }));
   $('#btn-clear-replays')?.addEventListener('click', clearAllReplays);
+  $('#btn-replay-pause-upload')?.addEventListener('click', () => {
+    setReplayRecordingPaused(!replayState.recordingPaused);
+  });
+  updateReplayPauseUi();
 
   const replayParam = new URLSearchParams(location.search).get('replay');
   if (replayParam) {

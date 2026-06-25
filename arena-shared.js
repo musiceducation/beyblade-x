@@ -13,6 +13,18 @@ function getAllMatches(data) {
   ];
 }
 
+const PHASE_ORDER_SHARED = { prelim: 0, revival: 1, quarter: 2, challenge: 3, semi: 4, final: 5 };
+
+function getReadyMatches(data) {
+  return getAllMatches(data)
+    .filter((m) => m.status === 'pending' && m.p1Id && m.p2Id)
+    .sort((a, b) => (PHASE_ORDER_SHARED[a.phase] ?? 9) - (PHASE_ORDER_SHARED[b.phase] ?? 9));
+}
+
+function getQueueMatches(data, count = 3) {
+  return getReadyMatches(data).slice(0, count);
+}
+
 function downloadBlob(filename, blob) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

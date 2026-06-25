@@ -57,6 +57,9 @@ export type ArenaLiveState = {
   matchOver?: boolean;
   matchLabel?: string | null;
   active?: boolean;
+  broadcastStatus?: 'live' | 'break' | 'delay' | string;
+  broadcastMessage?: string;
+  stationName?: string;
 };
 
 export type ArenaStateRow = {

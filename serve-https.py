@@ -73,8 +73,21 @@ ARENA_LIVE_STATE = {
     'matchOver': False,
     'matchLabel': None,
     'active': False,
+    'broadcastStatus': 'live',
+    'broadcastMessage': '',
+    'stationName': '台 1',
 }
 ARENA_LIVE_LOCK = threading.Lock()
+
+MATCH_LOCK = {
+    'matchId': None,
+    'session': None,
+    'operatorId': None,
+    'operatorLabel': None,
+    'matchLabel': None,
+    'since': 0,
+}
+MATCH_LOCK_GUARD = threading.Lock()
 
 
 def ensure_replay_dir():
@@ -351,6 +364,49 @@ def push_arena_live_to_cloud(live):
         return True, None
     text = raw.decode('utf-8', errors='replace') if isinstance(raw, bytes) else str(raw)
     return False, f'arena_live {status} {text}'
+
+
+def match_lock_snapshot():
+    with MATCH_LOCK_GUARD:
+        return dict(MATCH_LOCK)
+
+
+def handle_match_lock_post(payload):
+    action = payload.get('action')
+    operator_id = payload.get('operatorId')
+    if not operator_id:
+        return False, 'missing operatorId', match_lock_snapshot()
+
+    with MATCH_LOCK_GUARD:
+        if action == 'release':
+            if MATCH_LOCK['operatorId'] == operator_id or not MATCH_LOCK['matchId']:
+                MATCH_LOCK['matchId'] = None
+                MATCH_LOCK['session'] = None
+                MATCH_LOCK['operatorId'] = None
+                MATCH_LOCK['operatorLabel'] = None
+                MATCH_LOCK['matchLabel'] = None
+                MATCH_LOCK['since'] = 0
+                return True, None, dict(MATCH_LOCK)
+            return False, 'not lock owner', dict(MATCH_LOCK)
+
+        if action != 'claim':
+            return False, 'unknown action', dict(MATCH_LOCK)
+
+        match_id = payload.get('matchId')
+        if not match_id:
+            return False, 'missing matchId', dict(MATCH_LOCK)
+
+        current = MATCH_LOCK['matchId']
+        if current and current != match_id and MATCH_LOCK['operatorId'] != operator_id:
+            return False, 'locked by other station', dict(MATCH_LOCK)
+
+        MATCH_LOCK['matchId'] = match_id
+        MATCH_LOCK['session'] = payload.get('session')
+        MATCH_LOCK['operatorId'] = operator_id
+        MATCH_LOCK['operatorLabel'] = payload.get('operatorLabel') or '裁判台'
+        MATCH_LOCK['matchLabel'] = payload.get('matchLabel')
+        MATCH_LOCK['since'] = int(time.time() * 1000)
+        return True, None, dict(MATCH_LOCK)
 
 
 def push_replay_meta_to_cloud(session):
@@ -873,6 +929,10 @@ class ArenaHandler(http.server.SimpleHTTPRequestHandler):
                 self._send_json(dict(ARENA_LIVE_STATE))
             return
 
+        if path == '/match/lock.json':
+            self._send_json(match_lock_snapshot())
+            return
+
         if path == '/cloud/status.json':
             cfg = get_cloud_config()
             self._send_json({
@@ -1019,10 +1079,30 @@ class ArenaHandler(http.server.SimpleHTTPRequestHandler):
                     ARENA_LIVE_STATE['matchOver'] = bool(payload['matchOver'])
                 if 'active' in payload:
                     ARENA_LIVE_STATE['active'] = bool(payload['active'])
+                if 'broadcastStatus' in payload:
+                    ARENA_LIVE_STATE['broadcastStatus'] = str(payload['broadcastStatus'])[:32]
+                if 'broadcastMessage' in payload:
+                    ARENA_LIVE_STATE['broadcastMessage'] = str(payload['broadcastMessage'])[:200]
+                if 'stationName' in payload:
+                    ARENA_LIVE_STATE['stationName'] = str(payload['stationName'])[:40]
                 ARENA_LIVE_STATE['updatedAt'] = int(time.time() * 1000)
                 live_snapshot = dict(ARENA_LIVE_STATE)
             self._send_json({'ok': True})
             threading.Thread(target=push_arena_live_to_cloud, args=(live_snapshot,), daemon=True).start()
+            return
+
+        if path == '/match/lock.json':
+            raw = self._read_body()
+            try:
+                payload = json.loads(raw.decode('utf-8') or '{}')
+            except json.JSONDecodeError:
+                self._send_json({'error': 'bad json'}, 400)
+                return
+            ok, err, lock = handle_match_lock_post(payload)
+            if ok:
+                self._send_json({'ok': True, 'lock': lock})
+            else:
+                self._send_json({'ok': False, 'error': err, 'lock': lock}, 409)
             return
 
         if path == '/tournament/state.json':

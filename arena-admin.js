@@ -53,6 +53,21 @@ async function runEventChecklist() {
 
   items.push({ label: 'HTTPS 伺服器', ok: location.protocol === 'https:', hint: location.protocol === 'https:' ? '已連線' : '請用 https://…:8443' });
 
+  const fsOk = typeof document.fullscreenEnabled === 'boolean' ? document.fullscreenEnabled : true;
+  items.push({
+    label: '全螢幕 API',
+    ok: fsOk,
+    hint: fsOk ? '可進入全螢幕倒數' : '此瀏覽器可能無法全螢幕',
+  });
+
+  const audio = document.getElementById('go-shoot-audio');
+  const audioOk = audio && audio.readyState >= 2;
+  items.push({
+    label: '倒數音效',
+    ok: !!audioOk,
+    hint: audioOk ? '已載入' : '請按「預熱倒數音效」或先點一次畫面',
+  });
+
   try {
     const r = await fetch('/cloud/status.json', { cache: 'no-store' });
     const d = await r.json();
@@ -72,12 +87,25 @@ async function runEventChecklist() {
   }
 
   const camOk = typeof state !== 'undefined' && (state.cameraStream || state.cameraMode === 'url' || state.cameraMode === 'remote');
-  items.push({ label: '鏡頭', ok: camOk, hint: camOk ? '已啟用' : '可選：開啟鏡頭' });
+  items.push({ label: '鏡頭', ok: camOk, hint: camOk ? '已啟用' : '建議：先開鏡頭再全螢幕' });
+
+  const competitionOn = typeof isCompetitionMode === 'function' ? isCompetitionMode() : true;
+  items.push({
+    label: '比賽模式',
+    ok: competitionOn,
+    hint: competitionOn ? '倒數優先、減少延遲' : '已關閉（不建議現場使用）',
+  });
 
   const pending = typeof replayState !== 'undefined'
     ? replayState.replays.filter((r) => r.videoId && !r.cloudSynced).length
     : 0;
+  const replayPaused = typeof replayState !== 'undefined' && replayState.recordingPaused;
   items.push({ label: '待上傳回放', ok: pending === 0, hint: pending ? `${pending} 段待傳` : '全部已同步' });
+  items.push({
+    label: '回放錄製',
+    ok: !replayPaused,
+    hint: replayPaused ? '已暫停（比賽中可關閉上傳）' : '錄製與上傳已開啟',
+  });
 
   const list = $('#checklist-items');
   if (!list) return items;
@@ -87,6 +115,24 @@ async function runEventChecklist() {
       <span class="checklist-label">${it.label}</span>
       <span class="checklist-hint">${it.hint}</span>
     </li>`).join('');
+
+  const summary = $('#checklist-summary');
+  if (summary) {
+    const warn = items.filter((it) => !it.ok).length;
+    const critical = items.filter((it) => !it.ok && ['HTTPS 伺服器', '賽程同步', '已抽籤'].includes(it.label)).length;
+    summary.textContent = warn === 0
+      ? '✅ 全部就緒，可以全螢幕開賽'
+      : critical > 0
+        ? `⚠ ${warn} 項待處理（含 ${critical} 項必須修正）`
+        : `⚠ ${warn} 項建議處理後再開賽`;
+    summary.dataset.status = warn === 0 ? 'ok' : critical > 0 ? 'critical' : 'warn';
+  }
+
+  const toggle = $('#competition-mode-toggle');
+  if (toggle && typeof isCompetitionMode === 'function') {
+    toggle.checked = isCompetitionMode();
+  }
+
   return items;
 }
 

@@ -151,12 +151,17 @@ function buildArenaLivePayload() {
     matchOver: state.matchOver,
     matchLabel,
     active: true,
+    broadcastStatus: typeof arenaBroadcast !== 'undefined' ? arenaBroadcast.status : 'live',
+    broadcastMessage: typeof arenaBroadcast !== 'undefined' ? arenaBroadcast.message : '',
+    stationName: typeof getStationName === 'function' ? getStationName() : '台 1',
   };
 }
 
 function pushArenaLiveState() {
+  if (isLaunchCritical()) return;
   clearTimeout(arenaLiveTimer);
   arenaLiveTimer = setTimeout(() => {
+    if (isLaunchCritical()) return;
     fetch('/arena/live.json', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -164,6 +169,38 @@ function pushArenaLiveState() {
       cache: 'no-store',
     }).catch(() => {});
   }, 150);
+}
+
+function updateArenaSyncBanner() {
+  const banner = $('#arena-sync-banner');
+  if (!banner) return;
+
+  const tEl = $('#tournament-sync-status');
+  const cEl = $('#cloud-sync-status');
+  const tStatus = tEl?.dataset.status || 'local';
+  const cStatus = cEl?.hidden ? null : (cEl?.dataset.status || 'idle');
+  const lock = typeof matchLockState !== 'undefined' ? matchLockState.remoteLock : null;
+  const myId = typeof getOperatorId === 'function' ? getOperatorId() : null;
+
+  const issues = [];
+  if (tStatus === 'error' || tStatus === 'offline') issues.push('賽程同步異常');
+  if (cStatus === 'error') issues.push('雲端同步失敗');
+  if (lock?.matchId && lock.operatorId !== myId) {
+    issues.push(`${lock.operatorLabel || '其他台'} 進行 ${lock.matchLabel || lock.matchId}`);
+  }
+  if (typeof replayState !== 'undefined') {
+    const pending = replayState.replays.filter((r) => r.videoId && r.cloudSynced === false).length;
+    if (pending > 5) issues.push(`回放待傳 ${pending}`);
+  }
+
+  if (!issues.length) {
+    banner.hidden = true;
+    banner.textContent = '';
+    return;
+  }
+  banner.hidden = false;
+  banner.dataset.level = tStatus === 'offline' || cStatus === 'error' ? 'error' : 'warn';
+  banner.textContent = issues.join(' · ');
 }
 
 function renderScoreTrack(container, score) {
@@ -293,7 +330,7 @@ function showFinishAnnounce(type, player, points) {
 }
 
 function adjustScore(player, delta) {
-  if (state.matchOver) return;
+  if (state.matchOver || launchPlaying || scoringLocked) return;
   const idx = player - 1;
   const next = Math.max(0, Math.min(getMatchTarget(), state.scores[idx] + delta));
   if (next === state.scores[idx]) return;
@@ -315,7 +352,7 @@ function setScoreDirect(player, value) {
 }
 
 function awardFinish(player, type) {
-  if (state.matchOver) return;
+  if (state.matchOver || launchPlaying || scoringLocked) return;
 
   const pts = FINISH_POINTS[type];
   const idx = player - 1;
@@ -463,7 +500,13 @@ function endMatch(winnerIdx) {
   $('#victory-detail').textContent = detail;
   const inTournament = typeof tournamentState !== 'undefined' && tournamentState.activeMatchId;
   const revertBtn = $('#btn-victory-revert');
-  if (revertBtn) revertBtn.hidden = !inTournament;
+  if (revertBtn) {
+    revertBtn.hidden = !inTournament;
+    if (inTournament) {
+      revertBtn.classList.add('btn-victory-revert--prominent');
+      revertBtn.textContent = '↩ 撤銷本場結果（按錯可還原）';
+    }
+  }
   if (!inTournament && typeof hideVictorySchedulePanel === 'function') {
     hideVictorySchedulePanel();
     $('#btn-dismiss-victory').textContent = '繼續';
@@ -551,8 +594,9 @@ const GO_SHOOT_SYNC = [
   { at: 4.18, label: 'Go Shoot!', fx: true },
 ];
 const GO_SHOOT_DURATION = 6.528;
-const LAUNCH_ZOOM_MS = 600;
+const LAUNCH_ZOOM_MS = 200;
 const PARTICLE_CAP = 160;
+const COMPETITION_MODE_KEY = 'bex-competition-mode';
 let launchRaf = null;
 let launchStep = -1;
 let goShootFxFired = false;
@@ -561,6 +605,70 @@ let launchEnteredFullscreen = false;
 
 let launchFullscreenActive = false;
 let launchStandbyActive = false;
+let competitionScanPaused = false;
+let scoringLocked = false;
+
+function isCompetitionMode() {
+  return sessionStorage.getItem(COMPETITION_MODE_KEY) !== '0';
+}
+
+function setCompetitionMode(on) {
+  sessionStorage.setItem(COMPETITION_MODE_KEY, on ? '1' : '0');
+  const toggle = $('#competition-mode-toggle');
+  if (toggle) toggle.checked = on;
+}
+
+function isLaunchCritical() {
+  return launchPlaying
+    || launchStandbyActive
+    || document.body.classList.contains('launch-countdown');
+}
+
+function setScoringLocked(locked) {
+  scoringLocked = locked;
+  document.body.classList.toggle('scoring-locked', locked);
+  $$('.btn-finish, .btn-score-adj').forEach((el) => {
+    el.disabled = locked || state.matchOver;
+  });
+  const nextBtn = $('#btn-next-battle');
+  if (nextBtn) nextBtn.disabled = locked || state.matchOver;
+}
+
+function pauseCompetitionBackground() {
+  if (!isCompetitionMode()) return;
+  if (typeof beyScanState !== 'undefined' && beyScanState.enabled && typeof setBeyScanEnabled === 'function') {
+    competitionScanPaused = true;
+    setBeyScanEnabled(false);
+  }
+}
+
+function resumeCompetitionBackground() {
+  if (!competitionScanPaused || typeof setBeyScanEnabled !== 'function') return;
+  competitionScanPaused = false;
+  if (isCompetitionMode()) setBeyScanEnabled(true);
+}
+
+async function warmCompetitionAssets() {
+  if (audioCtx?.state === 'suspended') {
+    try { await audioCtx.resume(); } catch (_) { /* ignore */ }
+  }
+  if (!goShootAudio) return false;
+  const ready = await ensureGoShootAudioReady();
+  if (!ready || goShootAudio.readyState < 2) return false;
+  try {
+    const volume = goShootAudio.volume;
+    goShootAudio.volume = 0;
+    goShootAudio.currentTime = 0;
+    const p = goShootAudio.play();
+    if (p) await p;
+    goShootAudio.pause();
+    goShootAudio.currentTime = 0;
+    goShootAudio.volume = volume;
+    return true;
+  } catch (_) {
+    return goShootAudio.readyState >= 2;
+  }
+}
 
 async function enterCameraZoomMode() {
   if (!state.cameraStream && $('#cam-source').value === 'local') {
@@ -574,7 +682,9 @@ async function enterCameraZoomMode() {
     document.body.classList.add('launch-active');
     showExitLaunchButton();
     await enterBrowserFullscreen();
-    await new Promise((resolve) => setTimeout(resolve, LAUNCH_ZOOM_MS));
+    if (LAUNCH_ZOOM_MS > 0) {
+      await new Promise((resolve) => setTimeout(resolve, LAUNCH_ZOOM_MS));
+    }
   } else {
     launchFullscreenActive = !!document.fullscreenElement;
     if (!document.fullscreenElement) {
@@ -635,6 +745,8 @@ async function enterCameraStandbyMode() {
   if (badge) badge.setAttribute('data-hint', isTouchDevice() ? '點下方開始' : 'Space 開始倒數');
   const relaunch = $('#btn-relaunch');
   if (relaunch) relaunch.hidden = true;
+
+  warmCompetitionAssets().catch(() => {});
 }
 
 async function runLaunchCountdownSequence() {
@@ -656,6 +768,8 @@ async function runLaunchCountdownSequence() {
   clearLaunchOverlayText();
   document.body.classList.add('launch-countdown');
   document.body.classList.remove('launch-standby');
+  setScoringLocked(true);
+  pauseCompetitionBackground();
 
   if ($('#voice-countdown').checked && goShootAudio) {
     startLaunchCountdownAudio();
@@ -911,9 +1025,11 @@ function triggerAnimeImpact(stepIndex) {
 }
 
 function getLaunchFxScale() {
-  if (window.matchMedia('(hover: none) and (pointer: coarse)').matches) return 0.55;
-  if (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) return 0.72;
-  return 1;
+  let scale = 1;
+  if (window.matchMedia('(hover: none) and (pointer: coarse)').matches) scale *= 0.55;
+  else if (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) scale *= 0.72;
+  if (isCompetitionMode() && isLaunchCritical()) scale *= 0.82;
+  return scale;
 }
 
 function scaledFxCount(base) {
@@ -1009,7 +1125,7 @@ function syncLaunchVisuals() {
   const steps = getScaledSync();
 
   for (let i = launchStep + 1; i < steps.length; i++) {
-    if (t < steps[i].at - 0.015) break;
+    if (t < steps[i].at - 0.008) break;
     launchStep = i;
     showLaunchOverlayText(steps[i].label, i);
     if (steps[i].fx) goShootFxFired = true;
@@ -1049,6 +1165,8 @@ function finishLaunchCountdown() {
   btn.disabled = false;
   launchPlaying = false;
   state.readyForNextRound = false;
+  setScoringLocked(false);
+  resumeCompetitionBackground();
   if (goShootAudio) goShootAudio.onended = null;
   addLog('Three, Two, One, Go Shoot!');
   if (typeof onReplayBattleStart === 'function') onReplayBattleStart();
@@ -1104,6 +1222,8 @@ function triggerGoShootMoment() {
 
 function resetLaunchTimer(exitFullscreen = true) {
   launchStandbyActive = false;
+  setScoringLocked(false);
+  resumeCompetitionBackground();
   if (!exitFullscreen) state.readyForNextRound = false;
   if (launchPlaying || launchTimers.length || launchRaf) {
     launchTimers.forEach(clearTimeout);
@@ -1183,7 +1303,9 @@ async function startLaunchCountdownAudio() {
     if (launchPlaying) finishLaunchCountdown();
   };
 
-  await ensureGoShootAudioReady();
+  if (goShootAudio.readyState < 2) {
+    await ensureGoShootAudioReady();
+  }
 
   const playPromise = goShootAudio.play();
   if (playPromise) {
@@ -2742,6 +2864,25 @@ function init() {
   updateMatchTargetUI();
   if (typeof initArenaAdmin === 'function') initArenaAdmin();
   if (typeof initSupabaseSync === 'function') initSupabaseSync();
+  if (typeof initMatchLockPoll === 'function') initMatchLockPoll();
+  if (typeof initArenaBroadcast === 'function') initArenaBroadcast();
+  setCompetitionMode(isCompetitionMode());
+  $('#competition-mode-toggle')?.addEventListener('change', (e) => {
+    setCompetitionMode(e.target.checked);
+    if (typeof showToast === 'function') {
+      showToast(e.target.checked ? '比賽模式：倒數優先、減少延遲' : '比賽模式已關閉');
+    }
+  });
+  $('#btn-checklist-warm')?.addEventListener('click', async () => {
+    const ok = await warmCompetitionAssets();
+    if (typeof showToast === 'function') {
+      showToast(ok ? '倒數音效已預熱' : '音效預熱失敗，請再試一次');
+    }
+    if (typeof runEventChecklist === 'function') runEventChecklist();
+  });
+  document.body.addEventListener('pointerdown', () => {
+    warmCompetitionAssets().catch(() => {});
+  }, { once: true });
   $('#btn-copy-player-link')?.addEventListener('click', () => { copyPlayerLink().catch(console.error); });
   updatePlayerQrDisplay().catch(console.error);
 

@@ -31,6 +31,36 @@ const state = {
   activeReplayId: null,
 };
 
+const FOLLOW_KEY = 'bex-player-follow';
+
+function initPlayerFollow() {
+  const params = new URLSearchParams(location.search);
+  const followParam = params.get('follow');
+  if (followParam) {
+    state.search = followParam.trim();
+    localStorage.setItem(FOLLOW_KEY, state.search);
+    const input = $('#player-search');
+    if (input) input.value = state.search;
+  } else {
+    const saved = localStorage.getItem(FOLLOW_KEY);
+    if (saved && !state.search) {
+      state.search = saved;
+      const input = $('#player-search');
+      if (input) input.value = saved;
+    }
+  }
+  updateFollowIndicator();
+}
+
+function updateFollowIndicator() {
+  const btn = $('#btn-follow-player');
+  if (!btn) return;
+  const saved = localStorage.getItem(FOLLOW_KEY);
+  const active = saved && state.search && saved.toLowerCase() === state.search.toLowerCase();
+  btn.classList.toggle('active', active);
+  btn.title = active ? `已追蹤 ${saved}` : '追蹤目前搜尋的選手';
+}
+
 function escapeHtml(value) {
   return String(value)
     .replace(/&/g, '&amp;')
@@ -287,7 +317,8 @@ function updateNextMatchAlert() {
   if (next) {
     el.hidden = false;
     el.textContent = `📣 下一場：${next.label || PHASE_LABELS[next.phase] || ''} · ${playerName(data, next.p1Id)} vs ${playerName(data, next.p2Id)}`;
-    if (next.id !== lastNotifiedMatchId && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    const shouldNotify = !state.search || matchInvolvesName(next, data, state.search);
+    if (shouldNotify && next.id !== lastNotifiedMatchId && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
       const title = `${playerName(data, next.p1Id)} vs ${playerName(data, next.p2Id)}`;
       new Notification('下一場對戰', { body: `${next.label || ''} 即將開始`.trim(), tag: `next-${next.id}` });
       lastNotifiedMatchId = next.id;
@@ -479,6 +510,8 @@ function playReplay(replayId) {
 }
 
 function initPlayerPortal() {
+  initPlayerFollow();
+
   $('#player-session')?.addEventListener('change', (e) => {
     state.session = e.target.value;
     renderAll();
@@ -486,7 +519,17 @@ function initPlayerPortal() {
 
   $('#player-search')?.addEventListener('input', (e) => {
     state.search = e.target.value.trim();
+    updateFollowIndicator();
     renderAll();
+  });
+
+  $('#btn-follow-player')?.addEventListener('click', () => {
+    if (!state.search) {
+      alert('請先搜尋選手名字');
+      return;
+    }
+    localStorage.setItem(FOLLOW_KEY, state.search);
+    updateFollowIndicator();
   });
 
   $$('.player-tab').forEach((btn) => {

@@ -64,6 +64,12 @@ export default function LiveTab({ sessionData, search, liveOverlay, sessionKey }
 
   return (
     <section className="player-section live-tab" aria-label="即時比分">
+      {liveOverlay?.broadcastStatus && liveOverlay.broadcastStatus !== 'live' && (
+        <p className="live-broadcast-banner" data-status={liveOverlay.broadcastStatus}>
+          {liveOverlay.broadcastStatus === 'break' ? '休息' : liveOverlay.broadcastStatus === 'delay' ? '延遲' : liveOverlay.broadcastStatus}
+          {liveOverlay.broadcastMessage ? ` · ${liveOverlay.broadcastMessage}` : ''}
+        </p>
+      )}
       <div className="live-summary">
         <div className="live-summary-stat">
           <strong>{stats.done}</strong>

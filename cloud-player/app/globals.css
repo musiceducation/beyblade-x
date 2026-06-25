@@ -939,6 +939,85 @@ body {
   color: var(--muted);
 }
 
+.player-notify-btn {
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+.player-notify-btn.active {
+  border-color: #ffd60a;
+  background: rgba(255, 214, 10, 0.15);
+}
+
+.results-panel { display: flex; flex-direction: column; gap: 1.25rem; }
+.results-section-title { margin: 0 0 0.65rem; font-size: 1rem; }
+.results-award-list, .results-match-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.results-award-list li {
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.results-award-rank {
+  display: inline-block;
+  min-width: 2.5rem;
+  font-weight: 700;
+  color: var(--gold);
+}
+.results-standing-list { margin: 0; padding: 0; list-style: none; }
+.results-standing-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  margin-bottom: 0.4rem;
+}
+.results-standing-item.highlight {
+  border-color: rgba(255, 214, 10, 0.45);
+  background: rgba(255, 214, 10, 0.08);
+}
+.results-standing-rank {
+  width: 1.75rem;
+  font-weight: 700;
+  opacity: 0.55;
+}
+.results-standing-name { flex: 1; font-weight: 600; }
+.results-standing-record { font-size: 0.85rem; color: var(--muted); }
+.results-match-item {
+  padding: 0.4rem 0;
+  font-size: 0.88rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.live-broadcast-banner {
+  margin: 0 0 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  text-align: center;
+  font-weight: 700;
+  background: rgba(255, 214, 10, 0.12);
+  border: 1px solid rgba(255, 214, 10, 0.35);
+}
+.live-broadcast-banner[data-status="break"] {
+  background: rgba(100, 210, 255, 0.12);
+  border-color: rgba(100, 210, 255, 0.35);
+  color: #64d2ff;
+}
+.live-broadcast-banner[data-status="delay"] {
+  background: rgba(255, 69, 58, 0.12);
+  border-color: rgba(255, 69, 58, 0.35);
+  color: #ff453a;
+}
+
 /* ── Desktop ── */
 @media (min-width: 768px) {
   .portal-shell {

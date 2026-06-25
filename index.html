@@ -72,12 +72,27 @@
         <option value="semi">準決賽</option>
         <option value="final">決賽</option>
       </select>
+      <label class="header-broadcast" title="OBS / 雲端廣播狀態">
+        <select id="broadcast-status-select" class="session-select session-select--compact" aria-label="廣播狀態">
+          <option value="live">進行中</option>
+          <option value="break">休息</option>
+          <option value="delay">延遲</option>
+        </select>
+        <input id="broadcast-message-input" class="broadcast-message-input" type="text" placeholder="廣播訊息（選填）" maxlength="200">
+      </label>
+      <label class="header-station" title="計分台名稱">
+        <input id="station-name-input" class="station-name-input" type="text" placeholder="台 1" maxlength="40" aria-label="計分台名稱">
+      </label>
+      <a href="queue.html" class="btn btn-ghost" target="_blank" rel="noopener" title="叫號看板">📺</a>
+      <a href="setup.html" class="btn btn-ghost" target="_blank" rel="noopener" title="HTTPS 設定">🔒</a>
       <button id="btn-fullscreen" class="btn btn-ghost" title="全螢幕">⛶</button>
       <button id="btn-event-checklist" class="btn btn-ghost" type="button" title="開賽檢查">✅</button>
       <button id="btn-admin-settings" class="btn btn-ghost" type="button" title="管理設定">⚙</button>
       <button id="btn-reset-match" class="btn btn-ghost">重置對戰</button>
     </div>
   </header>
+
+  <div id="arena-sync-banner" class="arena-sync-banner" hidden role="status" aria-live="polite"></div>
 
   <nav class="app-nav" aria-label="主界面">
     <button type="button" class="app-nav-btn active" data-view="battle">⚔ 對戰計分</button>
@@ -213,7 +228,7 @@
           <button id="btn-reset-bracket" class="btn btn-sm btn-ghost" type="button">重設賽程</button>
         </div>
       </div>
-      <p class="tournament-rundown">比賽流程：初賽 → 復活賽（僅初賽落敗）→ 複賽（落敗直接淘汰）→ 四強挑戰 → 準決賽 → 決賽 · 無季軍戰</p>
+      <p class="tournament-rundown">比賽流程：初賽 → 復活賽（僅初賽落敗）→ 複賽（落敗直接淘汰）→ 四強挑戰 → 準決賽 → 決賽 · 無季軍戰 · 賽程表可直接改分、設勝負、雙擊進入計分</p>
       <aside class="player-qr-card" id="player-qr-card" aria-label="選手查閱 QR">
         <div class="player-qr-card-inner">
           <img id="player-qr" class="player-qr-img" alt="選手查閱 QR" width="140" height="140" hidden>
@@ -223,6 +238,8 @@
             <p id="player-qr-link" class="player-qr-link"></p>
             <button id="btn-copy-player-link" class="btn btn-sm btn-ghost" type="button">複製連結</button>
             <a id="overlay-link" href="overlay.html?session=junior" class="btn btn-sm btn-ghost" target="_blank" rel="noopener">OBS 投影</a>
+            <a href="queue.html" class="btn btn-sm btn-ghost" target="_blank" rel="noopener">叫號看板</a>
+            <a href="setup.html" class="btn btn-sm btn-ghost" target="_blank" rel="noopener">HTTPS 設定</a>
             <span class="player-qr-hint overlay-hint">透明底：<code>overlay.html?transparent=1&amp;compact=1</code></span>
           </div>
         </div>
@@ -375,6 +392,7 @@
           <h2>戰鬥回放 <span id="replay-count" class="replay-count-badge" hidden></span>
             <span id="replay-sync-status" class="replay-sync-status" data-status="idle" hidden></span>
           </h2>
+          <button id="btn-replay-pause-upload" class="btn btn-sm btn-ghost" type="button" aria-pressed="false">⏸ 暫停錄製上傳</button>
           <button id="btn-clear-replays" class="btn btn-sm btn-ghost" type="button">清除全部</button>
         </div>
         <p class="replay-hint">同一 Match 的多局會歸在同一組；有鏡頭時每局另存影片。重播得分會全螢幕播放，並依實際時間軸同步得分事件。</p>
@@ -474,8 +492,14 @@
     <div class="admin-modal-backdrop"></div>
     <div class="admin-modal-card">
       <h3 id="checklist-title">開賽前檢查</h3>
+      <p id="checklist-summary" class="checklist-summary" aria-live="polite"></p>
+      <label class="checklist-competition-toggle">
+        <input type="checkbox" id="competition-mode-toggle" checked>
+        比賽模式（倒數時鎖定計分、暫停掃描、減少延遲）
+      </label>
       <ul id="checklist-items" class="checklist-items"></ul>
       <div class="admin-modal-actions">
+        <button id="btn-checklist-warm" class="btn btn-sm btn-primary" type="button">預熱倒數音效</button>
         <button id="btn-checklist-refresh" class="btn btn-sm btn-ghost" type="button">重新檢查</button>
         <button id="btn-checklist-close" class="btn btn-sm btn-primary" type="button">關閉</button>
       </div>
@@ -509,6 +533,8 @@
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
   <script src="arena-config.local.js" onerror="void 0"></script>
   <script src="arena-shared.js"></script>
+  <script src="arena-match-lock.js"></script>
+  <script src="arena-broadcast.js"></script>
   <script src="arena-pin.js"></script>
   <script src="supabase-sync.js"></script>
   <script src="tournament.js"></script>

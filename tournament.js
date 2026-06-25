@@ -319,6 +319,7 @@ function updateSyncIndicator(status) {
   };
   el.textContent = labels[status] || labels.local;
   el.dataset.status = status;
+  if (typeof updateArenaSyncBanner === 'function') updateArenaSyncBanner();
 }
 
 async function initTournamentSync() {
@@ -751,6 +752,7 @@ function recordMatchWinner(matchId, winnerSide, result) {
   advanceWinners();
   persistSession();
   renderTournamentUI();
+  if (typeof releaseMatchLock === 'function') releaseMatchLock();
   return true;
 }
 
@@ -774,7 +776,14 @@ function adminSetMatchWinner(matchId, winnerSide, options = {}) {
     alert('對戰選手未齊');
     return false;
   }
-  if (!adminRequirePin(options.walkover ? '棄權判勝' : '手動設定勝者')) return false;
+  if (!options.skipPin) {
+    if (options.walkover) {
+      if (!adminRequirePin('棄權判勝')) return false;
+    } else {
+      const wName = playerName(winnerSide === 1 ? match.p1Id : match.p2Id);
+      if (!confirm(`確定「${match.label}」由 ${wName} 勝出？`)) return false;
+    }
+  }
 
   if (match.status === 'done') {
     adminRevertMatch(matchId, { skipPin: true, silent: true });
@@ -784,13 +793,16 @@ function adminSetMatchWinner(matchId, winnerSide, options = {}) {
   const scores = options.scores || (winnerSide === 1 ? [target, 0] : [0, target]);
   recordMatchWinner(matchId, winnerSide, {
     scores,
-    battles: options.battles ?? 1,
+    battles: options.battles ?? match.liveBattles ?? match.battles ?? 1,
   });
 
   const wName = playerName(winnerSide === 1 ? match.p1Id : match.p2Id);
-  addLog(`⚙ ${options.walkover ? '棄權' : '手動'} — ${escapeHtml(match.label)} <strong>${escapeHtml(wName)}</strong> 勝`, 'system');
-  if (tournamentState.activeMatchId === matchId && typeof resetMatchScoresOnly === 'function') {
-    resetMatchScoresOnly();
+  addLog(`⚙ ${options.walkover ? '棄權' : '賽程'} — ${escapeHtml(match.label)} <strong>${escapeHtml(wName)}</strong> 勝`, 'system');
+  if (tournamentState.activeMatchId === matchId) {
+    tournamentState.activeMatchId = null;
+    if (typeof resetMatchScoresOnly === 'function') resetMatchScoresOnly();
+    if (typeof releaseMatchLock === 'function') releaseMatchLock();
+    persistSession();
   }
   return true;
 }
@@ -822,7 +834,80 @@ function adminRevertMatch(matchId, options = {}) {
   persistSession();
   renderTournamentUI();
   if (!options.silent) addLog(`↩ 已撤銷 ${escapeHtml(match.label)} 結果`, 'system');
+  if (typeof releaseMatchLock === 'function') releaseMatchLock();
   return true;
+}
+
+function getMatchScoresForEdit(match) {
+  if (match.status === 'done' && match.scores) return [...match.scores];
+  if (match.liveScores) return [...match.liveScores];
+  return [0, 0];
+}
+
+function readBracketScoreInputs(matchEl) {
+  const s1 = parseInt(matchEl.querySelector('.bracket-score-in[data-side="1"]')?.value, 10);
+  const s2 = parseInt(matchEl.querySelector('.bracket-score-in[data-side="2"]')?.value, 10);
+  const target = typeof getMatchTarget === 'function' ? getMatchTarget() : 4;
+  return [
+    Math.max(0, Math.min(target, Number.isFinite(s1) ? s1 : 0)),
+    Math.max(0, Math.min(target, Number.isFinite(s2) ? s2 : 0)),
+  ];
+}
+
+function adminApplyBracketScores(matchId, scores) {
+  const match = findMatch(matchId);
+  if (!match?.p1Id || !match?.p2Id) return false;
+
+  if (match.status === 'done') {
+    match.scores = [...scores];
+    persistSession();
+    renderTournamentUI({ scrollActive: false });
+    addLog(`⚙ ${escapeHtml(match.label)} 比分改為 <span class="log-score">${scores[0]} : ${scores[1]}</span>`, 'system');
+    return true;
+  }
+
+  match.liveScores = [...scores];
+  tournamentState.activeMatchId = matchId;
+  if (typeof nameEls !== 'undefined') {
+    nameEls[0].value = playerName(match.p1Id);
+    nameEls[1].value = playerName(match.p2Id);
+  }
+  if (typeof state !== 'undefined') {
+    state.scores = [...scores];
+    state.matchOver = false;
+    if (typeof updateScoreDisplay === 'function') updateScoreDisplay();
+  }
+  persistSession();
+  renderTournamentUI({ scrollActive: false });
+  return true;
+}
+
+function adminQuickWin(matchId, winnerSide, scores) {
+  const match = findMatch(matchId);
+  if (!match) return false;
+  if (match.status === 'done') {
+    const wName = playerName(winnerSide === 1 ? match.p1Id : match.p2Id);
+    if (!confirm(`將「${match.label}」勝者改為 ${wName}？`)) return false;
+  }
+  const target = typeof getMatchTarget === 'function' ? getMatchTarget() : 4;
+  let finalScores = scores ? [...scores] : null;
+  if (finalScores) {
+    const wIdx = winnerSide - 1;
+    const lIdx = 1 - wIdx;
+    if (finalScores[wIdx] < finalScores[lIdx]) {
+      finalScores = winnerSide === 1 ? [target, finalScores[lIdx]] : [finalScores[lIdx], target];
+    }
+  }
+  return adminSetMatchWinner(matchId, winnerSide, {
+    scores: finalScores || undefined,
+    battles: match.liveBattles || match.battles || 1,
+    skipPin: true,
+  });
+}
+
+function shortPlayerName(id) {
+  const n = playerName(id);
+  return n.length > 6 ? `${n.slice(0, 5)}…` : n;
 }
 
 function exportPrintableBracket() {
@@ -1020,7 +1105,7 @@ function resetTournament() {
   renderTournamentUI();
 }
 
-function loadMatchToScoreboard(matchId) {
+async function loadMatchToScoreboard(matchId) {
   const match = findMatch(matchId);
   if (!match) return;
   if (!match.p1Id && !match.p2Id) {
@@ -1029,6 +1114,14 @@ function loadMatchToScoreboard(matchId) {
   }
   if (match.status === 'done') {
     if (!confirm('此場已完成，仍要重新載入？')) return;
+  }
+
+  if (typeof claimMatchLock === 'function') {
+    const lockResult = await claimMatchLock(matchId, match.label, tournamentState.session);
+    if (!lockResult.ok && lockResult.lock?.matchId) {
+      alert(`此場已由 ${lockResult.lock.operatorLabel || '其他台'} 進行中：${lockResult.lock.matchLabel || lockResult.lock.matchId}`);
+      return;
+    }
   }
 
   const wasActive = tournamentState.activeMatchId === matchId;
@@ -1049,8 +1142,15 @@ function loadMatchToScoreboard(matchId) {
     loadMatchScores(match.scores, match.battles, true);
   } else {
     resetMatchScoresOnly({ keepLaunch: useCameraStandby });
-    match.liveScores = [0, 0];
-    match.liveBattles = 1;
+    const resume = match.liveScores && (wasActive || match.liveScores[0] > 0 || match.liveScores[1] > 0);
+    if (resume) {
+      state.scores = [...match.liveScores];
+      state.currentBattle = match.liveBattles || 1;
+      updateScoreDisplay();
+    } else {
+      match.liveScores = [0, 0];
+      match.liveBattles = 1;
+    }
   }
 
   renderTournamentUI();
@@ -1114,6 +1214,7 @@ function onTournamentMatchWin(winnerSide, result) {
     tournamentState.activeMatchId = null;
     persistSession();
     renderTournamentUI();
+    if (typeof releaseMatchLock === 'function') releaseMatchLock();
     if (typeof showVictoryScheduleAfterMatch === 'function') {
       showVictoryScheduleAfterMatch();
     }
@@ -1179,9 +1280,11 @@ function renderMatchCard(match) {
   const p2Win = match.winnerId === match.p2Id;
   const canStart = match.p1Id || match.p2Id;
   const phaseCls = PHASE_STYLES[match.phase]?.cls || '';
-  const displayScores = match.status === 'done' ? match.scores : active ? match.liveScores : null;
+  const editScores = getMatchScoresForEdit(match);
+  const displayScores = match.status === 'done' ? match.scores : match.liveScores;
   const scoreText = formatMatchScore(match);
   const battleText = match.battles ? `${match.battles} 局` : active && match.liveBattles ? `${match.liveBattles} 局` : '';
+  const target = typeof getMatchTarget === 'function' ? getMatchTarget() : 4;
 
   function slotClass(side, id, won, lost) {
     if (!id) return 'slot empty';
@@ -1192,31 +1295,49 @@ function renderMatchCard(match) {
 
   function slotScore(idx) {
     if (!displayScores) return '';
-    const target = typeof getMatchTarget === 'function' ? getMatchTarget() : 4;
     const cls = displayScores[idx] >= target ? 'slot-score win' : 'slot-score';
     return `<span class="${cls}">${displayScores[idx]}</span>`;
   }
 
-  const adminBtns = match.p1Id && match.p2Id ? `
-    <div class="bracket-admin" data-match-id="${match.id}">
+  const scoreEditor = match.p1Id && match.p2Id ? `
+    <div class="bracket-score-edit" data-match-id="${match.id}">
+      <label class="bracket-score-field">
+        <span class="bracket-score-name red">${escapeHtml(shortPlayerName(match.p1Id))}</span>
+        <input type="number" class="bracket-score-in" data-side="1" min="0" max="${target}" value="${editScores[0]}" aria-label="P1 分數">
+      </label>
+      <span class="bracket-score-sep">:</span>
+      <label class="bracket-score-field">
+        <span class="bracket-score-name blue">${escapeHtml(shortPlayerName(match.p2Id))}</span>
+        <input type="number" class="bracket-score-in" data-side="2" min="0" max="${target}" value="${editScores[1]}" aria-label="P2 分數">
+      </label>
+      <button type="button" class="btn btn-xs btn-ghost btn-bracket-apply" title="套用比分">套用</button>
+    </div>
+    <div class="bracket-actions" data-match-id="${match.id}">
+      <button type="button" class="btn btn-xs ${active ? 'btn-primary' : 'btn-ghost'} btn-bracket-enter" data-match-id="${match.id}">
+        ${active ? '▶ 計分中' : '進入計分'}
+      </button>
       ${match.status !== 'done' ? `
-        <button type="button" class="btn btn-xs btn-ghost btn-admin-win" data-side="1" title="P1 勝">P1勝</button>
-        <button type="button" class="btn btn-xs btn-ghost btn-admin-win" data-side="2" title="P2 勝">P2勝</button>
-        <button type="button" class="btn btn-xs btn-ghost btn-admin-walk" data-side="1" title="P1 棄權對手勝">P1棄</button>
-        <button type="button" class="btn btn-xs btn-ghost btn-admin-walk" data-side="2" title="P2 棄權對手勝">P2棄</button>
+        <button type="button" class="btn btn-xs btn-ghost btn-bracket-win btn-bracket-win-p1" data-side="1" title="${escapeHtml(playerName(match.p1Id))} 勝">
+          ${escapeHtml(shortPlayerName(match.p1Id))} 勝
+        </button>
+        <button type="button" class="btn btn-xs btn-ghost btn-bracket-win btn-bracket-win-p2" data-side="2" title="${escapeHtml(playerName(match.p2Id))} 勝">
+          ${escapeHtml(shortPlayerName(match.p2Id))} 勝
+        </button>
+        <button type="button" class="btn btn-xs btn-ghost btn-admin-walk" data-side="1" title="P1 棄權">棄</button>
+        <button type="button" class="btn btn-xs btn-ghost btn-admin-walk" data-side="2" title="P2 棄權">棄</button>
       ` : `
+        <button type="button" class="btn btn-xs btn-ghost btn-bracket-win btn-bracket-win-p1" data-side="1">改 ${escapeHtml(shortPlayerName(match.p1Id))} 勝</button>
+        <button type="button" class="btn btn-xs btn-ghost btn-bracket-win btn-bracket-win-p2" data-side="2">改 ${escapeHtml(shortPlayerName(match.p2Id))} 勝</button>
         <button type="button" class="btn btn-xs btn-ghost btn-admin-revert" title="撤銷完場">撤銷</button>
       `}
     </div>` : '';
-
-  const btnLabel = active ? '▶ 進行中' : match.status === 'done' ? '重新載入' : '開始對戰';
 
   return `<li class="bracket-match ${statusClass} ${phaseCls}" data-match-id="${match.id}">
     <div class="bracket-match-head">
       <span class="bracket-label">${escapeHtml(match.label)}</span>
       <div class="bracket-match-meta">
         ${scoreText ? `<span class="bracket-score-badge">${scoreText}</span>` : ''}
-        ${battleText && match.status === 'done' ? `<span class="bracket-battle-badge">${battleText}</span>` : ''}
+        ${battleText ? `<span class="bracket-battle-badge">${battleText}</span>` : ''}
         <span class="bracket-status-badge status-${statusClass}">${statusLabel}</span>
       </div>
     </div>
@@ -1237,9 +1358,7 @@ function renderMatchCard(match) {
         </span>
       </div>
     </div>
-    ${adminBtns}
-    <button type="button" class="btn btn-sm ${active ? 'btn-primary' : 'btn-ghost'} btn-load-match" data-match-id="${match.id}"
-      ${!canStart ? 'disabled' : ''}>${btnLabel}</button>
+    ${scoreEditor}
   </li>`;
 }
 
@@ -1417,8 +1536,39 @@ function renderTournamentUI(options = {}) {
     renderBracketColumn('final', finals) +
     '</div>';
 
-  bracket.querySelectorAll('.btn-load-match').forEach((btn) => {
-    btn.addEventListener('click', () => loadMatchToScoreboard(btn.dataset.matchId));
+  bracket.querySelectorAll('.btn-bracket-enter').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      loadMatchToScoreboard(btn.dataset.matchId);
+    });
+  });
+
+  bracket.querySelectorAll('.btn-bracket-apply').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const card = btn.closest('.bracket-match');
+      if (!card) return;
+      const scores = readBracketScoreInputs(card);
+      adminApplyBracketScores(card.dataset.matchId, scores);
+    });
+  });
+
+  bracket.querySelectorAll('.btn-bracket-win').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const card = btn.closest('.bracket-match');
+      if (!card) return;
+      const scores = readBracketScoreInputs(card);
+      adminQuickWin(card.dataset.matchId, parseInt(btn.dataset.side, 10), scores);
+    });
+  });
+
+  bracket.querySelectorAll('.bracket-match').forEach((card) => {
+    card.addEventListener('dblclick', (e) => {
+      if (e.target.closest('button, input')) return;
+      const id = card.dataset.matchId;
+      if (id) loadMatchToScoreboard(id);
+    });
   });
 
   bracket.querySelectorAll('.bracket-next-link').forEach((btn) => {
@@ -1429,13 +1579,6 @@ function renderTournamentUI(options = {}) {
     btn.addEventListener('click', () => setChallengeOpponent(parseInt(btn.dataset.q, 10)));
   });
 
-  bracket.querySelectorAll('.btn-admin-win').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const card = btn.closest('.bracket-match');
-      adminSetMatchWinner(card?.dataset.matchId, parseInt(btn.dataset.side, 10));
-    });
-  });
   bracket.querySelectorAll('.btn-admin-walk').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();

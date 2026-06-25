@@ -141,3 +141,38 @@ html.overlay-compact .overlay-player strong {
   40% { transform: scale(1.18); }
   100% { transform: scale(1); }
 }
+
+.overlay-broadcast {
+  flex: 1;
+  text-align: center;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--gold);
+  animation: overlay-broadcast-pulse 2.5s ease-in-out infinite;
+}
+.overlay-broadcast[data-status="break"] { color: #64d2ff; }
+.overlay-broadcast[data-status="delay"] { color: var(--red); }
+
+@keyframes overlay-broadcast-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.overlay-queue {
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--panel-border);
+}
+.overlay-queue-item {
+  margin: 0.25rem 0;
+  font-size: 0.82rem;
+  opacity: 0.9;
+}
+.overlay-queue-tag {
+  display: inline-block;
+  min-width: 4.5rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  opacity: 0.55;
+  margin-right: 0.35rem;
+}

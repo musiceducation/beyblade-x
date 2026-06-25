@@ -4,12 +4,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { SESSION_LABELS } from '@/lib/constants';
 import LiveTab from '@/components/LiveTab';
 import ReplayTab from '@/components/ReplayTab';
+import ResultsTab from '@/components/ResultsTab';
 import ScheduleTab from '@/components/ScheduleTab';
 import { filterReplaysBySession, getAllMatches, matchInvolvesName, playerName, sortMatches } from '@/lib/tournament';
+import { getSavedFollowName, requestNotifyPermission, saveFollowName, useFollowPlayer } from '@/lib/follow';
 import { useArenaData } from '@/lib/useArenaData';
 import { PHASE_LABELS } from '@/lib/constants';
 
-type Tab = 'live' | 'schedule' | 'replay';
+type Tab = 'live' | 'schedule' | 'replay' | 'results';
 
 const SYNC_LABELS = {
   connecting: '連線中',
@@ -29,6 +31,7 @@ export default function PlayerPortal() {
   const [search, setSearch] = useState('');
   const [activeReplayId, setActiveReplayId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [followSaved, setFollowSaved] = useState('');
 
   const { syncStatus, configError, arenaState, replays, lastUpdated, refresh } = useArenaData(tab);
 
@@ -63,8 +66,15 @@ export default function PlayerPortal() {
     const urlTab = params.get('tab');
     const urlSession = params.get('session');
     const replayId = params.get('replay');
-    if (urlTab === 'live' || urlTab === 'schedule' || urlTab === 'replay') setTab(urlTab);
+    const follow = params.get('follow');
+    if (urlTab === 'live' || urlTab === 'schedule' || urlTab === 'replay' || urlTab === 'results') setTab(urlTab);
     if (urlSession === 'junior' || urlSession === 'senior') setSession(urlSession);
+    if (follow) setSearch(follow);
+    else {
+      const saved = getSavedFollowName();
+      if (saved) setSearch(saved);
+    }
+    setFollowSaved(getSavedFollowName());
     if (replayId) {
       setActiveReplayId(replayId);
       setTab('replay');
@@ -72,6 +82,7 @@ export default function PlayerPortal() {
   }, []);
 
   const sessionData = arenaState?.[session as 'junior' | 'senior'] || null;
+  useFollowPlayer(search, sessionData);
   const matches = useMemo(() => getAllMatches(sessionData), [sessionData]);
   const filteredReplays = useMemo(
     () => filterReplaysBySession(replays, session, search),
@@ -159,18 +170,40 @@ export default function PlayerPortal() {
               ✕
             </button>
           )}
+          <button
+            type="button"
+            className={`player-notify-btn${search && followSaved.toLowerCase() === search.toLowerCase() ? ' active' : ''}`}
+            onClick={() => {
+              if (!search) return;
+              saveFollowName(search);
+              setFollowSaved(search);
+            }}
+            title="追蹤目前搜尋的選手"
+            aria-label="追蹤選手"
+          >
+            ⭐
+          </button>
+          <button
+            type="button"
+            className="player-notify-btn"
+            onClick={requestNotifyPermission}
+            title="開啟下一場提醒"
+            aria-label="開啟通知"
+          >
+            🔔
+          </button>
         </div>
       </header>
 
       <nav className="player-tabs" aria-label="查閱分頁">
-        {(['live', 'schedule', 'replay'] as Tab[]).map((t) => (
+        {(['live', 'schedule', 'results', 'replay'] as Tab[]).map((t) => (
           <button
             key={t}
             type="button"
             className={`player-tab${tab === t ? ' active' : ''}`}
             onClick={() => setTabWithUrl(t)}
           >
-            {t === 'live' ? '即時' : t === 'schedule' ? '賽程' : '回放'}
+            {t === 'live' ? '即時' : t === 'schedule' ? '賽程' : t === 'results' ? '成績' : '回放'}
             {t === 'live' && hasLive && <span className="player-tab-live" aria-label="進行中" />}
             {t === 'schedule' && pendingCount > 0 && (
               <span className="player-tab-badge">{pendingCount}</span>
@@ -202,6 +235,13 @@ export default function PlayerPortal() {
         )}
         {tab === 'schedule' && (
           <ScheduleTab
+            sessionData={sessionData}
+            sessionLabel={SESSION_LABELS[session]}
+            search={search}
+          />
+        )}
+        {tab === 'results' && (
+          <ResultsTab
             sessionData={sessionData}
             sessionLabel={SESSION_LABELS[session]}
             search={search}

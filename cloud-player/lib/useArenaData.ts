@@ -10,7 +10,7 @@ const LIVE_POLL_MS = 800;
 const IDLE_POLL_MS = 4000;
 const REPLAY_POLL_MS = 6000;
 
-export function useArenaData(tab: 'live' | 'schedule' | 'replay') {
+export function useArenaData(tab: 'live' | 'schedule' | 'replay' | 'results') {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('connecting');
   const [configError, setConfigError] = useState<string | null>(null);
   const [arenaState, setArenaState] = useState<ArenaStateRow | null>(null);

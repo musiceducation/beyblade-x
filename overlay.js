@@ -31,11 +31,23 @@ function phaseLabel(phase, matchLabel) {
 
 function renderNextMatch(data) {
   const nextEl = $('#overlay-next');
+  const queueEl = $('#overlay-queue');
   if (!data?.drawn) {
     nextEl.hidden = true;
+    if (queueEl) queueEl.hidden = true;
     return;
   }
-  const next = getAllMatches(data)
+  const queue = typeof getQueueMatches === 'function' ? getQueueMatches(data, 3) : [];
+  if (queueEl && queue.length) {
+    queueEl.hidden = false;
+    const labels = ['ON DECK', 'UP NEXT', ''];
+    queueEl.innerHTML = queue.slice(0, 2).map((m, i) => `
+      <p class="overlay-queue-item"><span class="overlay-queue-tag">${labels[i]}</span>
+      ${m.label || PHASE_LABELS[m.phase] || ''} · ${playerName(data, m.p1Id)} vs ${playerName(data, m.p2Id)}</p>`).join('');
+  } else if (queueEl) {
+    queueEl.hidden = true;
+  }
+  const next = queue[0] || getAllMatches(data)
     .filter((m) => m.status === 'pending' && m.p1Id && m.p2Id)
     .slice(0, 1)[0];
   if (next) {
@@ -44,6 +56,25 @@ function renderNextMatch(data) {
       `${next.label || PHASE_LABELS[next.phase] || ''} · ${playerName(data, next.p1Id)} vs ${playerName(data, next.p2Id)}`;
   } else {
     nextEl.hidden = true;
+  }
+}
+
+function renderBroadcastBanner() {
+  const el = $('#overlay-broadcast');
+  if (!el) return;
+  const status = arenaLive?.broadcastStatus;
+  const msg = arenaLive?.broadcastMessage;
+  if (status && status !== 'live') {
+    el.hidden = false;
+    el.dataset.status = status;
+    const prefix = status === 'break' ? '休息' : status === 'delay' ? '延遲' : status;
+    el.textContent = msg ? `${prefix} · ${msg}` : prefix;
+  } else if (msg) {
+    el.hidden = false;
+    el.dataset.status = 'live';
+    el.textContent = msg;
+  } else {
+    el.hidden = true;
   }
 }
 
@@ -73,6 +104,7 @@ function render() {
 
   const liveSession = arenaLive?.session || session;
   $('#overlay-session').textContent = SESSION_LABELS[liveSession] || liveSession;
+  renderBroadcastBanner();
 
   const arenaFresh = arenaLive?.active
     && arenaLive.updatedAt

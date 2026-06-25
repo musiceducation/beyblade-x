@@ -151,6 +151,7 @@ function updateCloudSyncIndicator(status, detail) {
   el.textContent = labels[status] || labels.idle;
   el.dataset.status = status;
   el.title = detail || (status === 'error' && supabaseSyncState.lastError) || 'Supabase 雲端';
+  if (typeof updateArenaSyncBanner === 'function') updateArenaSyncBanner();
 }
 
 function initSupabaseSync() {
@@ -172,6 +173,7 @@ function scheduleCloudTournamentPush() {
   if (!isSupabaseSyncEnabled()) return;
   clearTimeout(cloudPushTimer);
   cloudPushTimer = setTimeout(() => {
+    if (typeof isLaunchCritical === 'function' && isLaunchCritical()) return;
     if (typeof buildFullSyncPayload !== 'function') return;
     updateCloudSyncIndicator('syncing');
     const payload = buildFullSyncPayload();

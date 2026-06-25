@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>咩咩遊樂園 — HTTPS 設定指南</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body { max-width: 720px; margin: 0 auto; padding: 1.5rem; }
+    .setup-page h1 { font-family: Orbitron, sans-serif; }
+    .setup-step { margin: 1.25rem 0; padding: 1rem; border-radius: 12px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); }
+    .setup-step h2 { margin: 0 0 0.5rem; font-size: 1.1rem; }
+    .setup-step ol { margin: 0.5rem 0 0 1.25rem; }
+    .setup-step li { margin: 0.35rem 0; }
+    code { background: rgba(0,0,0,0.35); padding: 0.15rem 0.4rem; border-radius: 4px; }
+    .setup-url { word-break: break-all; font-weight: 600; color: #5ac8fa; }
+    .setup-back { display: inline-block; margin-bottom: 1rem; }
+  </style>
+</head>
+<body class="setup-page">
+  <a class="setup-back btn btn-ghost" href="index.html">← 返回主機</a>
+  <h1>🔒 HTTPS 信任設定</h1>
+  <p>現場手機、平板與 OBS 需信任本機 HTTPS 憑證，才能開啟鏡頭、全螢幕與即時查閱。</p>
+
+  <div class="setup-step">
+    <h2>1. 啟動伺服器</h2>
+    <p>在 Mac 主機執行 <code>./start.sh</code>，預設網址：</p>
+    <p class="setup-url" id="setup-https-url">https://本機IP:8443/</p>
+  </div>
+
+  <div class="setup-step">
+    <h2>2. iPhone / iPad（Safari）</h2>
+    <ol>
+      <li>用 Safari 開啟上方 HTTPS 網址</li>
+      <li>若出現「此連線非私人連線」→ 點「顯示詳細資料」→「造訪此網站」</li>
+      <li>若要長期信任：設定 → 一般 → 關於 → 憑證信任設定 → 啟用本機憑證（若已安裝描述檔）</li>
+      <li>重新整理頁面，確認網址列有鎖頭圖示</li>
+    </ol>
+  </div>
+
+  <div class="setup-step">
+    <h2>3. Android（Chrome）</h2>
+    <ol>
+      <li>Chrome 開啟 HTTPS 網址</li>
+      <li>警告頁面 →「進階」→「繼續前往…（不安全）」</li>
+      <li>若需鏡頭：點網址列鎖頭 → 網站設定 → 允許相機</li>
+    </ol>
+  </div>
+
+  <div class="setup-step">
+    <h2>4. OBS Browser Source</h2>
+    <ol>
+      <li>來源 → 瀏覽器 → 網址填 <code>overlay.html?session=junior&amp;transparent=1&amp;compact=1</code></li>
+      <li>寬度 1920、高度 1080，勾選「自訂 CSS」可留空</li>
+      <li>若無法載入：OBS 設定 → 進階 → 關閉「硬體加速」後重試</li>
+      <li>叫號看板可用 <code>queue.html</code></li>
+    </ol>
+  </div>
+
+  <div class="setup-step">
+    <h2>5. 選手查閱（4G 雲端）</h2>
+    <p>無需信任憑證：掃主機「選手查閱 QR」連到 Vercel 雲端入口。場內主機需設定 <code>arena-secrets.local.json</code> 並保持 <code>./start.sh</code> 運行以同步資料。</p>
+  </div>
+
+  <script>
+    (function () {
+      const host = location.hostname || 'localhost';
+      const el = document.getElementById('setup-https-url');
+      if (el) el.textContent = `https://${host}:8443/`;
+    })();
+  </script>
+</body>
+</html>

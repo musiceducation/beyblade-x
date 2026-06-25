@@ -109,3 +109,40 @@ export function filterReplaysBySession<T extends { metadata: Record<string, unkn
     );
   });
 }
+
+export type PlayerStanding = { id: string; name: string; wins: number; losses: number };
+
+export function computeStandings(data: SessionData | null): PlayerStanding[] {
+  if (!data?.players?.length) return [];
+  const stats = new Map(data.players.map((p) => [p.id, { id: p.id, name: p.name, wins: 0, losses: 0 }]));
+  getAllMatches(data).forEach((m) => {
+    if (m.status !== 'done' || !m.winnerId) return;
+    const loserId = m.winnerId === m.p1Id ? m.p2Id : m.p1Id;
+    const winner = stats.get(m.winnerId);
+    if (winner) winner.wins += 1;
+    if (loserId) {
+      const loser = stats.get(loserId);
+      if (loser) loser.losses += 1;
+    }
+  });
+  return [...stats.values()].sort((a, b) => b.wins - a.wins || a.losses - b.losses);
+}
+
+export type SessionAwards = {
+  champion: string;
+  runnerUp: string;
+  top4: string[];
+};
+
+export function computeAwards(data: SessionData | null): SessionAwards | null {
+  if (!data?.matches) return null;
+  const fin = data.matches.final as Match | undefined;
+  if (!fin?.winnerId) return null;
+  const champion = playerName(data, fin.winnerId);
+  const runnerId = fin.winnerId === fin.p1Id ? fin.p2Id : fin.p1Id;
+  const runnerUp = playerName(data, runnerId);
+  const semis = ((data.matches.semi as Match[]) || []).map((m) => m.winnerId).filter(Boolean);
+  const top4Ids = [...new Set([...semis, fin.p1Id, fin.p2Id].filter(Boolean))] as string[];
+  const top4 = top4Ids.map((id) => playerName(data, id));
+  return { champion, runnerUp, top4 };
+}

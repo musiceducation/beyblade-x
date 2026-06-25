@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>咩咩遊樂園 — 叫號看板</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Orbitron:wght@700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="queue.css">
+</head>
+<body>
+  <div class="queue-root">
+    <header class="queue-header">
+      <span id="queue-session" class="queue-session">低齡組</span>
+      <span id="queue-broadcast" class="queue-broadcast" hidden></span>
+      <span id="queue-clock" class="queue-clock"></span>
+    </header>
+
+    <section class="queue-slot queue-now">
+      <p class="queue-label">NOW · 進行中</p>
+      <div id="queue-now-body" class="queue-match-body">
+        <p class="queue-empty">等待對戰…</p>
+      </div>
+    </section>
+
+    <section class="queue-slot queue-ondeck">
+      <p class="queue-label">ON DECK · 準備</p>
+      <div id="queue-ondeck-body" class="queue-match-body">
+        <p class="queue-empty">—</p>
+      </div>
+    </section>
+
+    <section class="queue-slot queue-next">
+      <p class="queue-label">UP NEXT · 下一場</p>
+      <div id="queue-next-body" class="queue-match-body">
+        <p class="queue-empty">—</p>
+      </div>
+    </section>
+  </div>
+  <script src="arena-shared.js"></script>
+  <script src="queue.js"></script>
+</body>
+</html>

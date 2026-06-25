@@ -423,6 +423,10 @@ body {
   font-size: 1.1rem;
   cursor: pointer;
 }
+.player-notify-btn.active {
+  border-color: #ffd60a;
+  background: rgba(255, 214, 10, 0.15);
+}
 
 .player-footer {
   padding: 0.5rem 1rem;
