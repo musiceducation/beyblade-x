@@ -61,6 +61,7 @@ export default function ReplayTab({
   onSelectReplay,
 }: Props) {
   const [downloadStatus, setDownloadStatus] = useState<'idle' | 'downloading'>('idle');
+  const [batchGroupId, setBatchGroupId] = useState<string | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
 
@@ -106,6 +107,24 @@ export default function ReplayTab({
       setShareCopied(true);
       window.setTimeout(() => setShareCopied(false), 2000);
     }).catch(() => window.prompt('複製連結：', url));
+  };
+
+  const downloadGroup = async (rounds: ArenaReplayRow[]) => {
+    const gid = rounds[0]?.match_group_id || rounds[0]?.id;
+    if (!gid) return;
+    setBatchGroupId(gid);
+    for (const r of rounds) {
+      if (!r.has_video) continue;
+      const meta = replayMeta(r);
+      await downloadCloudReplay(
+        r,
+        replayVideoUrl(r.id),
+        { p1Name: meta?.p1Name, p2Name: meta?.p2Name, battleNum: r.battle_num ?? meta?.battleNum },
+        () => {},
+      );
+      await new Promise((res) => window.setTimeout(res, 450));
+    }
+    setBatchGroupId(null);
   };
 
   if (!replayGroups.length) {
@@ -260,6 +279,16 @@ export default function ReplayTab({
                     總分 {summary.total[0]}:{summary.total[1]}
                   </span>
                   <span className="replay-group-time">{formatReplayDate(summary.createdAt)}</span>
+                  {summary.videoCount > 0 && (
+                    <button
+                      type="button"
+                      className="replay-group-batch-dl"
+                      disabled={batchGroupId === (rounds[0].match_group_id || rounds[0].id)}
+                      onClick={() => downloadGroup(rounds)}
+                    >
+                      {batchGroupId === (rounds[0].match_group_id || rounds[0].id) ? '下載中…' : '⬇ 整場'}
+                    </button>
+                  )}
                 </div>
               </header>
               <ul className="replay-rounds">

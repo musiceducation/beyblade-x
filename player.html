@@ -22,6 +22,7 @@
         <option value="senior">第二場 高齡組</option>
       </select>
       <input id="player-search" type="search" class="player-search" placeholder="搜尋選手名字…" autocomplete="off">
+      <button id="btn-enable-notify" type="button" class="player-notify-btn" title="開啟下一場提醒">🔔</button>
     </div>
   </header>
 
@@ -33,6 +34,7 @@
 
   <main class="player-main">
     <p id="player-next-alert" class="player-next-alert" hidden></p>
+    <p id="player-stats" class="player-stats" hidden></p>
     <section id="tab-live" class="player-section active" aria-label="即時比分">
       <div id="live-active" class="live-active-card" hidden>
         <p class="live-label">進行中</p>

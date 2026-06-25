@@ -74,6 +74,7 @@ body {
 
 .player-select,
 .player-search {
+  flex: 1;
   font-family: var(--font);
   font-size: 0.9rem;
   padding: 0.5rem 0.65rem;
@@ -401,6 +402,27 @@ body {
 }
 
 .player-next-alert[hidden] { display: none; }
+
+.player-stats {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(255, 214, 10, 0.12);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.player-stats[hidden] { display: none; }
+
+.player-notify-btn {
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 1.1rem;
+  cursor: pointer;
+}
 
 .player-footer {
   padding: 0.5rem 1rem;

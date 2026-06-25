@@ -19,7 +19,26 @@ const SESSION_LABELS = {
   senior: '第二場 高齡組（12歲+）',
 };
 
-const MATCH_TARGET = 4;
+const MATCH_TARGET_KEY = 'bex-match-target';
+const DEFAULT_MATCH_TARGET = 4;
+
+function getMatchTarget() {
+  const v = parseInt(localStorage.getItem(MATCH_TARGET_KEY), 10);
+  return Number.isFinite(v) && v >= 1 && v <= 10 ? v : DEFAULT_MATCH_TARGET;
+}
+
+function setMatchTarget(n) {
+  localStorage.setItem(MATCH_TARGET_KEY, String(Math.max(1, Math.min(10, n))));
+}
+
+function updateMatchTargetUI() {
+  const target = getMatchTarget();
+  const label = document.querySelector('.match-target');
+  if (label) label.textContent = `${target} 分制`;
+  const input = $('#match-target-input');
+  if (input) input.value = String(target);
+  updateScoreTracks();
+}
 
 const FINISH_POINTS = {
   spin: 1,
@@ -150,7 +169,7 @@ function pushArenaLiveState() {
 function renderScoreTrack(container, score) {
   if (!container) return;
   container.innerHTML = '';
-  for (let p = 0; p < MATCH_TARGET; p++) {
+  for (let p = 0; p < getMatchTarget(); p++) {
     const seg = document.createElement('span');
     seg.className = 'score-seg' + (p < score ? ' filled' : '');
     container.appendChild(seg);
@@ -273,6 +292,28 @@ function showFinishAnnounce(type, player, points) {
   }, 2400);
 }
 
+function adjustScore(player, delta) {
+  if (state.matchOver) return;
+  const idx = player - 1;
+  const next = Math.max(0, Math.min(getMatchTarget(), state.scores[idx] + delta));
+  if (next === state.scores[idx]) return;
+  state.scores[idx] = next;
+  updateScoreDisplay();
+  addLog(`⚙ 手動調分 P${player} → ${state.scores[0]} : ${state.scores[1]}`, 'system');
+  const target = getMatchTarget();
+  if (state.scores[0] >= target || state.scores[1] >= target) {
+    endMatch(state.scores[0] >= target ? 0 : 1);
+  }
+}
+
+function setScoreDirect(player, value) {
+  if (state.matchOver) return;
+  const idx = player - 1;
+  const v = Math.max(0, Math.min(getMatchTarget(), parseInt(value, 10) || 0));
+  state.scores[idx] = v;
+  updateScoreDisplay();
+}
+
 function awardFinish(player, type) {
   if (state.matchOver) return;
 
@@ -373,8 +414,9 @@ function checkMatchEnd() {
   const p1 = state.scores[0];
   const p2 = state.scores[1];
 
-  if (p1 >= MATCH_TARGET || p2 >= MATCH_TARGET) {
-    const winner = p1 >= MATCH_TARGET ? 0 : 1;
+  const target = getMatchTarget();
+  if (p1 >= target || p2 >= target) {
+    const winner = p1 >= target ? 0 : 1;
     endMatch(winner);
   }
 }
@@ -414,11 +456,14 @@ function endMatch(winnerIdx) {
   state.readyForNextRound = false;
   const name = nameEls[winnerIdx].value || `Blader ${winnerIdx + 1}`;
   const score = state.scores[winnerIdx];
-  const detail = `率先取得 ${MATCH_TARGET} 分（${score} : ${state.scores[1 - winnerIdx]}）· 共 ${state.currentBattle} 局對戰`;
+  const target = getMatchTarget();
+  const detail = `率先取得 ${target} 分（${score} : ${state.scores[1 - winnerIdx]}）· 共 ${state.currentBattle} 局對戰`;
 
   $('#victory-name').textContent = name;
   $('#victory-detail').textContent = detail;
   const inTournament = typeof tournamentState !== 'undefined' && tournamentState.activeMatchId;
+  const revertBtn = $('#btn-victory-revert');
+  if (revertBtn) revertBtn.hidden = !inTournament;
   if (!inTournament && typeof hideVictorySchedulePanel === 'function') {
     hideVictorySchedulePanel();
     $('#btn-dismiss-victory').textContent = '繼續';
@@ -2549,6 +2594,24 @@ function init() {
     $('#btn-dismiss-victory').textContent = '繼續';
     if (typeof switchAppView === 'function') switchAppView('tournament');
   });
+  $('#btn-victory-revert')?.addEventListener('click', () => {
+    const matchId = typeof tournamentState !== 'undefined' ? tournamentState.activeMatchId : null;
+    if (!matchId || typeof adminRevertMatch !== 'function') return;
+    if (adminRevertMatch(matchId)) {
+      state.matchOver = false;
+      state.finishHistory = [];
+      updateUndoButton();
+      $('#victory-overlay').hidden = true;
+      showToast('已撤銷完場，可重新計分');
+    }
+  });
+
+  $$('.btn-score-adj').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      adjustScore(parseInt(btn.dataset.player, 10), parseInt(btn.dataset.delta, 10));
+    });
+  });
+
   $('#btn-clear-log').addEventListener('click', () => {
     $('#battle-log').innerHTML = '';
     renderBattleLogStats();
@@ -2676,6 +2739,8 @@ function init() {
   initReplay();
   initAppViews();
   updateUndoButton();
+  updateMatchTargetUI();
+  if (typeof initArenaAdmin === 'function') initArenaAdmin();
   if (typeof initSupabaseSync === 'function') initSupabaseSync();
   $('#btn-copy-player-link')?.addEventListener('click', () => { copyPlayerLink().catch(console.error); });
   updatePlayerQrDisplay().catch(console.error);
@@ -2686,7 +2751,7 @@ function init() {
   }
 
   addLog(`歡迎來到咩咩遊樂園陀螺競賽 — ${getSessionLabel()} · ${getPhaseLabel()}`);
-  addLog('官方規則：整場 Match 累積計分，先取 4 分者勝');
+  addLog(`官方規則：整場 Match 累積計分，先取 ${getMatchTarget()} 分者勝`);
   addLog('得分判定：極致收尾 +3 · 擊飛／爆裂結局 +2 · 殘存結局 +1');
   addLog('國際對決口令：Three, Two, One, Go Shoot!');
   updateCamSourcePanels();

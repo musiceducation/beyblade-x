@@ -6,7 +6,7 @@ import { getEventSlug, getSupabase } from '@/lib/supabase';
 
 export type SyncStatus = 'connecting' | 'synced' | 'error' | 'unconfigured';
 
-const LIVE_POLL_MS = 1200;
+const LIVE_POLL_MS = 800;
 const IDLE_POLL_MS = 4000;
 const REPLAY_POLL_MS = 6000;
 

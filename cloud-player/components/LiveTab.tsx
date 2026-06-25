@@ -15,11 +15,19 @@ import type { Match } from '@/lib/constants';
 type Props = {
   sessionData: SessionData | null;
   search: string;
+  liveOverlay?: import('@/lib/constants').ArenaLiveState | null;
+  sessionKey?: string;
 };
 
-export default function LiveTab({ sessionData, search }: Props) {
+export default function LiveTab({ sessionData, search, liveOverlay, sessionKey }: Props) {
   const matches = useMemo(() => getAllMatches(sessionData), [sessionData]);
   const stats = useMemo(() => sessionStats(matches), [matches]);
+
+  const arenaFresh = liveOverlay?.active
+    && liveOverlay.updatedAt
+    && liveOverlay.session === sessionKey
+    && (Date.now() - liveOverlay.updatedAt) < 30000
+    && !liveOverlay.matchOver;
 
   const active = matches.find((m) => m.id === sessionData?.activeMatchId);
   const activeValid = active?.p1Id && active?.p2Id ? active : null;
@@ -70,7 +78,28 @@ export default function LiveTab({ sessionData, search }: Props) {
         </div>
       </div>
 
-      {activeValid ? (
+      {arenaFresh ? (
+        <div className="live-hero">
+          <p className="live-hero-label">進行中</p>
+          <h2 className="live-hero-title">
+            {liveOverlay.matchLabel || PHASE_LABELS[liveOverlay.phase || ''] || '對戰'}
+          </h2>
+          <div className="live-hero-scores">
+            <div className="live-hero-player live-hero-player--red">
+              <span>{liveOverlay.p1Name || 'Blader 1'}</span>
+              <strong>{(liveOverlay.scores || [0, 0])[0]}</strong>
+            </div>
+            <span className="live-hero-vs">VS</span>
+            <div className="live-hero-player live-hero-player--blue">
+              <span>{liveOverlay.p2Name || 'Blader 2'}</span>
+              <strong>{(liveOverlay.scores || [0, 0])[1]}</strong>
+            </div>
+          </div>
+          <p className="live-hero-battle">
+            {liveOverlay.battle ? `第 ${liveOverlay.battle} 局` : '比賽進行中'}
+          </p>
+        </div>
+      ) : activeValid ? (
         <div className="live-hero">
           <p className="live-hero-label">進行中</p>
           <h2 className="live-hero-title">

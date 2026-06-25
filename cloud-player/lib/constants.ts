@@ -46,12 +46,26 @@ export type SessionData = {
   activeMatchId?: string | null;
 };
 
+export type ArenaLiveState = {
+  updatedAt?: number;
+  session?: string;
+  phase?: string;
+  p1Name?: string;
+  p2Name?: string;
+  scores?: [number, number];
+  battle?: number;
+  matchOver?: boolean;
+  matchLabel?: string | null;
+  active?: boolean;
+};
+
 export type ArenaStateRow = {
   event_slug: string;
   revision: number;
   updated_at: string;
   junior: SessionData;
   senior: SessionData;
+  live?: ArenaLiveState | null;
 };
 
 export type ArenaReplayRow = {

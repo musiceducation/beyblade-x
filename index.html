@@ -73,6 +73,8 @@
         <option value="final">決賽</option>
       </select>
       <button id="btn-fullscreen" class="btn btn-ghost" title="全螢幕">⛶</button>
+      <button id="btn-event-checklist" class="btn btn-ghost" type="button" title="開賽檢查">✅</button>
+      <button id="btn-admin-settings" class="btn btn-ghost" type="button" title="管理設定">⚙</button>
       <button id="btn-reset-match" class="btn btn-ghost">重置對戰</button>
     </div>
   </header>
@@ -98,6 +100,10 @@
         <div class="score-display">
           <span id="score-p1" class="score-num">0</span>
           <span class="score-label" aria-hidden="true"></span>
+          <div class="score-adjust" aria-label="手動調分">
+            <button type="button" class="btn-score-adj" data-player="1" data-delta="-1" title="減 1 分">−</button>
+            <button type="button" class="btn-score-adj" data-player="1" data-delta="1" title="加 1 分">+</button>
+          </div>
         </div>
         <div class="finish-buttons">
           <button class="btn-finish spin" data-player="1" data-type="spin">
@@ -156,6 +162,10 @@
         <div class="score-display">
           <span id="score-p2" class="score-num">0</span>
           <span class="score-label" aria-hidden="true"></span>
+          <div class="score-adjust" aria-label="手動調分">
+            <button type="button" class="btn-score-adj" data-player="2" data-delta="-1" title="減 1 分">−</button>
+            <button type="button" class="btn-score-adj" data-player="2" data-delta="1" title="加 1 分">+</button>
+          </div>
         </div>
         <div class="finish-buttons">
           <button class="btn-finish spin" data-player="2" data-type="spin">
@@ -193,6 +203,10 @@
           <span id="draw-status" class="draw-badge">未抽籤</span>
           <button id="btn-draw" class="btn btn-sm btn-primary" type="button">🎲 抽籤配對</button>
           <button id="btn-export-csv" class="btn btn-sm btn-ghost" type="button">匯出 CSV</button>
+          <button id="btn-print-bracket" class="btn btn-sm btn-ghost" type="button">列印</button>
+          <button id="btn-export-stats" class="btn btn-sm btn-ghost" type="button">統計</button>
+          <button id="btn-export-awards" class="btn btn-sm btn-ghost" type="button">頒獎</button>
+          <button id="btn-share-schedule" class="btn btn-sm btn-ghost" type="button">分享</button>
           <button id="btn-backup-tournament" class="btn btn-sm btn-ghost" type="button">備份</button>
           <button id="btn-restore-tournament" class="btn btn-sm btn-ghost" type="button">還原</button>
           <input id="restore-tournament-file" type="file" accept="application/json,.json" hidden>
@@ -209,6 +223,7 @@
             <p id="player-qr-link" class="player-qr-link"></p>
             <button id="btn-copy-player-link" class="btn btn-sm btn-ghost" type="button">複製連結</button>
             <a id="overlay-link" href="overlay.html?session=junior" class="btn btn-sm btn-ghost" target="_blank" rel="noopener">OBS 投影</a>
+            <span class="player-qr-hint overlay-hint">透明底：<code>overlay.html?transparent=1&amp;compact=1</code></span>
           </div>
         </div>
       </aside>
@@ -399,6 +414,7 @@
         <p id="victory-detail" class="victory-detail">對戰完成</p>
         <div class="victory-actions">
           <button id="btn-dismiss-victory" class="btn btn-primary">繼續</button>
+          <button id="btn-victory-revert" class="btn btn-ghost" type="button" hidden>↩ 撤銷完場</button>
           <button id="btn-victory-bracket" class="btn btn-ghost" type="button" hidden>查看完整賽程</button>
         </div>
       </div>
@@ -454,7 +470,38 @@
     </div>
   </div>
 
-  <!-- Finish announcement toast -->
+  <div id="event-checklist-modal" class="admin-modal" hidden role="dialog" aria-labelledby="checklist-title">
+    <div class="admin-modal-backdrop"></div>
+    <div class="admin-modal-card">
+      <h3 id="checklist-title">開賽前檢查</h3>
+      <ul id="checklist-items" class="checklist-items"></ul>
+      <div class="admin-modal-actions">
+        <button id="btn-checklist-refresh" class="btn btn-sm btn-ghost" type="button">重新檢查</button>
+        <button id="btn-checklist-close" class="btn btn-sm btn-primary" type="button">關閉</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="admin-settings-modal" class="admin-modal" hidden role="dialog" aria-labelledby="admin-settings-title">
+    <div class="admin-modal-backdrop"></div>
+    <div class="admin-modal-card">
+      <h3 id="admin-settings-title">管理設定</h3>
+      <fieldset class="admin-fieldset">
+        <legend>管理 PIN</legend>
+        <label>目前 PIN <input id="pin-current" type="password" inputmode="numeric" autocomplete="off"></label>
+        <label>新 PIN <input id="pin-new" type="password" inputmode="numeric" autocomplete="off"></label>
+        <label>確認 PIN <input id="pin-confirm" type="password" inputmode="numeric" autocomplete="off"></label>
+        <button id="btn-pin-save" class="btn btn-sm btn-primary" type="button">儲存 PIN</button>
+        <button id="btn-pin-cancel" class="btn btn-sm btn-ghost" type="button">取消</button>
+      </fieldset>
+      <fieldset class="admin-fieldset">
+        <legend>勝利分數</legend>
+        <label>分數制 <input id="match-target-input" type="number" min="1" max="10" value="4"></label>
+        <button id="btn-match-target-save" class="btn btn-sm btn-primary" type="button">套用</button>
+      </fieldset>
+    </div>
+  </div>
+
   <div id="finish-toast" class="finish-toast" hidden aria-live="polite">
     <span id="toast-text"></span>
   </div>
@@ -468,6 +515,7 @@
   <script src="bey-detect.js"></script>
   <script src="bey-scan.js"></script>
   <script src="replay.js"></script>
+  <script src="arena-admin.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

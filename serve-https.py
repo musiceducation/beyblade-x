@@ -332,6 +332,27 @@ def push_tournament_to_cloud(revision, junior, senior):
     return False, f'arena_state {status} {text}'
 
 
+def push_arena_live_to_cloud(live):
+    cfg = get_cloud_config()
+    if not cfg or not live:
+        return False, 'cloud not configured'
+
+    slug = urllib.parse.quote(cfg['eventSlug'], safe='')
+    body = json.dumps({
+        'live': live,
+        'updated_at': _utc_iso(),
+    })
+    status, raw = _supabase_request(
+        'PATCH',
+        f'/rest/v1/arena_state?event_slug=eq.{slug}',
+        body,
+    )
+    if status and 200 <= status < 300:
+        return True, None
+    text = raw.decode('utf-8', errors='replace') if isinstance(raw, bytes) else str(raw)
+    return False, f'arena_live {status} {text}'
+
+
 def push_replay_meta_to_cloud(session):
     cfg = get_cloud_config()
     replay_id = session.get('id') if session else None
@@ -999,7 +1020,9 @@ class ArenaHandler(http.server.SimpleHTTPRequestHandler):
                 if 'active' in payload:
                     ARENA_LIVE_STATE['active'] = bool(payload['active'])
                 ARENA_LIVE_STATE['updatedAt'] = int(time.time() * 1000)
+                live_snapshot = dict(ARENA_LIVE_STATE)
             self._send_json({'ok': True})
+            threading.Thread(target=push_arena_live_to_cloud, args=(live_snapshot,), daemon=True).start()
             return
 
         if path == '/tournament/state.json':

@@ -115,3 +115,29 @@ html, body {
 .overlay-next-text {
   font-weight: 600;
 }
+
+html.overlay-transparent .overlay-root {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+html.overlay-compact .overlay-next,
+html.overlay-compact .overlay-empty {
+  display: none !important;
+}
+
+html.overlay-compact .overlay-player strong {
+  font-size: 2.4rem;
+}
+
+.overlay-root.score-pop .overlay-player strong {
+  animation: overlay-score-pop 0.55s ease;
+}
+
+@keyframes overlay-score-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}

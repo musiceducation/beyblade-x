@@ -192,7 +192,14 @@ export default function PlayerPortal() {
           </p>
         )}
 
-        {tab === 'live' && <LiveTab sessionData={sessionData} search={search} />}
+        {tab === 'live' && (
+          <LiveTab
+            sessionData={sessionData}
+            search={search}
+            liveOverlay={arenaState?.live}
+            sessionKey={session}
+          />
+        )}
         {tab === 'schedule' && (
           <ScheduleTab
             sessionData={sessionData}

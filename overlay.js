@@ -11,6 +11,14 @@ let tournamentState = null;
 let arenaLive = null;
 const params = new URLSearchParams(location.search);
 let session = params.get('session') || 'junior';
+let lastOverlayScores = null;
+
+if (params.get('transparent') === '1') {
+  document.documentElement.classList.add('overlay-transparent');
+}
+if (params.get('compact') === '1') {
+  document.documentElement.classList.add('overlay-compact');
+}
 
 function playerName(data, id) {
   if (!id || !data?.players) return '待定';
@@ -50,6 +58,12 @@ function showLive(names, scores, battle, label) {
   $('#overlay-p2-score').textContent = scores[1];
   $('#overlay-battle').textContent = battle ? `第 ${battle} 局` : '進行中';
   $('#overlay-phase').textContent = label || '';
+  if (lastOverlayScores && (lastOverlayScores[0] !== scores[0] || lastOverlayScores[1] !== scores[1])) {
+    const root = $('.overlay-root');
+    root?.classList.add('score-pop');
+    setTimeout(() => root?.classList.remove('score-pop'), 600);
+  }
+  lastOverlayScores = [...scores];
 }
 
 function render() {

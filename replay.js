@@ -27,6 +27,7 @@ const replayState = {
 function updateReplaySyncStatus() {
   const el = $('#replay-sync-status');
   if (!el) return;
+  el.hidden = false;
   const pendingLan = replayState.replays.filter((r) => r.serverSynced === false).length;
   const pendingCloud = typeof isSupabaseSyncEnabled === 'function' && isSupabaseSyncEnabled()
     ? replayState.replays.filter((r) => r.cloudSynced === false).length

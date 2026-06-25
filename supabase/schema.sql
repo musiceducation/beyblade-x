@@ -7,7 +7,8 @@ create table if not exists public.arena_state (
   revision bigint not null default 0,
   updated_at timestamptz not null default now(),
   junior jsonb not null default '{}'::jsonb,
-  senior jsonb not null default '{}'::jsonb
+  senior jsonb not null default '{}'::jsonb,
+  live jsonb not null default '{}'::jsonb
 );
 
 -- Replay metadata (videos in Storage bucket replay-videos)

@@ -178,5 +178,5 @@ function scheduleCloudTournamentPush() {
     const rev = typeof tournamentSync !== 'undefined' ? tournamentSync.revision : 0;
     payload.revision = Math.max(rev, supabaseSyncState.lastTournamentRevision + 1);
     pushTournamentPayloadToSupabase(payload).catch(console.error);
-  }, 600);
+  }, 300);
 }

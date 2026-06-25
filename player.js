@@ -105,7 +105,21 @@ function renderLive() {
   const matches = getAllMatches(data);
   const active = matches.find((m) => m.id === data.activeMatchId);
 
-  if (active && active.p1Id && active.p2Id) {
+  const arenaFresh = arenaLive?.active && arenaLive.session === state.session
+    && arenaLive.updatedAt && (Date.now() - arenaLive.updatedAt) < 30000
+    && !arenaLive.matchOver;
+
+  if (arenaFresh) {
+    activeCard.hidden = false;
+    empty.hidden = true;
+    $('#live-match-title').textContent = arenaLive.matchLabel || PHASE_LABELS[arenaLive.phase] || '對戰';
+    $('#live-p1-name').textContent = arenaLive.p1Name || 'Blader 1';
+    $('#live-p2-name').textContent = arenaLive.p2Name || 'Blader 2';
+    const scores = arenaLive.scores || [0, 0];
+    $('#live-p1-score').textContent = scores[0];
+    $('#live-p2-score').textContent = scores[1];
+    $('#live-battle').textContent = arenaLive.battle ? `第 ${arenaLive.battle} 局` : '進行中';
+  } else if (active && active.p1Id && active.p2Id) {
     activeCard.hidden = false;
     empty.hidden = true;
     $('#live-match-title').textContent = active.label || PHASE_LABELS[active.phase] || '對戰';
@@ -215,18 +229,56 @@ function replayMatchesSession(replay, session) {
   return !replay.session || replay.session === session;
 }
 
+let arenaLive = null;
+let lastNotifiedMatchId = null;
+
+async function pollArenaLive() {
+  try {
+    const res = await fetch('/arena/live.json', { cache: 'no-store' });
+    if (!res.ok) return;
+    arenaLive = await res.json();
+    renderLive();
+  } catch { /* ignore */ }
+}
+
+function renderPlayerStats() {
+  const el = $('#player-stats');
+  if (!el) return;
+  const data = getSessionData();
+  if (!state.search || !data?.players?.length) {
+    el.hidden = true;
+    return;
+  }
+  const q = state.search.toLowerCase();
+  const player = data.players.find((p) => p.name.toLowerCase().includes(q));
+  if (!player) {
+    el.hidden = true;
+    return;
+  }
+  let wins = 0;
+  let losses = 0;
+  getAllMatches(data).forEach((m) => {
+    if (m.status !== 'done' || !m.winnerId) return;
+    if (m.winnerId === player.id) wins += 1;
+    else if (m.p1Id === player.id || m.p2Id === player.id) losses += 1;
+  });
+  el.hidden = false;
+  el.textContent = `${player.name} — ${wins} 勝 ${losses} 負`;
+}
+
 function updateNextMatchAlert() {
   const el = $('#player-next-alert');
   if (!el || !state.search) {
     if (el) el.hidden = true;
+    renderPlayerStats();
     return;
   }
   const data = getSessionData();
   if (!data?.drawn) {
     el.hidden = true;
+    renderPlayerStats();
     return;
   }
-  const q = state.search.toLowerCase();
   const next = getAllMatches(data)
     .filter((m) => m.status === 'pending' && m.p1Id && m.p2Id)
     .sort((a, b) => (PHASE_ORDER[a.phase] ?? 9) - (PHASE_ORDER[b.phase] ?? 9))
@@ -235,9 +287,15 @@ function updateNextMatchAlert() {
   if (next) {
     el.hidden = false;
     el.textContent = `📣 下一場：${next.label || PHASE_LABELS[next.phase] || ''} · ${playerName(data, next.p1Id)} vs ${playerName(data, next.p2Id)}`;
+    if (next.id !== lastNotifiedMatchId && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      const title = `${playerName(data, next.p1Id)} vs ${playerName(data, next.p2Id)}`;
+      new Notification('下一場對戰', { body: `${next.label || ''} 即將開始`.trim(), tag: `next-${next.id}` });
+      lastNotifiedMatchId = next.id;
+    }
   } else {
     el.hidden = true;
   }
+  renderPlayerStats();
 }
 
 function renderReplays() {
@@ -442,8 +500,15 @@ function initPlayerPortal() {
 
   pollTournament();
   pollReplays();
+  pollArenaLive();
   setInterval(pollTournament, 1500);
   setInterval(pollReplays, 1500);
+  setInterval(pollArenaLive, 800);
+
+  $('#btn-enable-notify')?.addEventListener('click', () => {
+    if (typeof Notification === 'undefined') return;
+    Notification.requestPermission();
+  });
 
   const replayParam = new URLSearchParams(location.search).get('replay');
   if (replayParam) {

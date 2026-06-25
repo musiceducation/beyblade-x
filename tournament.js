@@ -5,7 +5,7 @@
 const MAX_PLAYERS = 16;
 const STORAGE_KEY = 'beyblade-tournament-v1';
 const SYNC_POLL_MS = 1500;
-const LIVE_SYNC_DEBOUNCE_MS = 400;
+const LIVE_SYNC_DEBOUNCE_MS = 200;
 
 const tournamentSync = {
   enabled: false,
@@ -743,6 +743,7 @@ function recordMatchWinner(matchId, winnerSide, result) {
   match.winnerId = winnerId;
   match.status = 'done';
   match.liveScores = null;
+  match.liveBattles = null;
   if (result?.scores) {
     match.scores = [...result.scores];
     match.battles = result.battles ?? null;
@@ -751,6 +752,151 @@ function recordMatchWinner(matchId, winnerSide, result) {
   persistSession();
   renderTournamentUI();
   return true;
+}
+
+function adminRequirePin(actionLabel) {
+  return typeof confirmArenaPin === 'function' && confirmArenaPin(actionLabel);
+}
+
+function adminResetMatchFields(match) {
+  match.status = 'pending';
+  match.winnerId = null;
+  match.scores = null;
+  match.battles = null;
+  match.liveScores = null;
+  match.liveBattles = null;
+}
+
+function adminSetMatchWinner(matchId, winnerSide, options = {}) {
+  const match = findMatch(matchId);
+  if (!match) return false;
+  if (!match.p1Id || !match.p2Id) {
+    alert('對戰選手未齊');
+    return false;
+  }
+  if (!adminRequirePin(options.walkover ? '棄權判勝' : '手動設定勝者')) return false;
+
+  if (match.status === 'done') {
+    adminRevertMatch(matchId, { skipPin: true, silent: true });
+  }
+
+  const target = typeof getMatchTarget === 'function' ? getMatchTarget() : 4;
+  const scores = options.scores || (winnerSide === 1 ? [target, 0] : [0, target]);
+  recordMatchWinner(matchId, winnerSide, {
+    scores,
+    battles: options.battles ?? 1,
+  });
+
+  const wName = playerName(winnerSide === 1 ? match.p1Id : match.p2Id);
+  addLog(`⚙ ${options.walkover ? '棄權' : '手動'} — ${escapeHtml(match.label)} <strong>${escapeHtml(wName)}</strong> 勝`, 'system');
+  if (tournamentState.activeMatchId === matchId && typeof resetMatchScoresOnly === 'function') {
+    resetMatchScoresOnly();
+  }
+  return true;
+}
+
+function adminWalkover(matchId, winnerSide) {
+  return adminSetMatchWinner(matchId, winnerSide, { walkover: true });
+}
+
+function adminRevertMatch(matchId, options = {}) {
+  const match = findMatch(matchId);
+  if (!match || match.status !== 'done') {
+    if (!options.silent) alert('此場尚未完結');
+    return false;
+  }
+  if (!options.skipPin && !adminRequirePin('撤銷完場結果')) return false;
+  if (!options.skipPin && !confirm(`撤銷「${match.label}」結果？之後輪次也會重設。`)) return false;
+
+  const myPhase = PHASE_ORDER[match.phase] ?? 0;
+  getAllMatchesFlat().forEach((m) => {
+    if ((PHASE_ORDER[m.phase] ?? 0) > myPhase) adminResetMatchFields(m);
+    else if (m.id === matchId) adminResetMatchFields(m);
+  });
+
+  if (typeof state !== 'undefined' && state.matchOver && tournamentState.activeMatchId === matchId && typeof resetMatchScoresOnly === 'function') {
+    resetMatchScoresOnly();
+  }
+
+  advanceWinners();
+  persistSession();
+  renderTournamentUI();
+  if (!options.silent) addLog(`↩ 已撤銷 ${escapeHtml(match.label)} 結果`, 'system');
+  return true;
+}
+
+function exportPrintableBracket() {
+  const all = loadTournamentStorage();
+  const rows = [];
+  ['junior', 'senior'].forEach((sk) => {
+    const data = all[sk];
+    if (!data?.drawn) return;
+    const label = sk === 'junior' ? '低齡組' : '高齡組';
+    rows.push(`<h2>${label}</h2><table><thead><tr><th>場次</th><th>對戰</th><th>比分</th><th>勝者</th></tr></thead><tbody>`);
+    getAllMatches(data).forEach((m) => {
+      const p1 = data.players?.find((p) => p.id === m.p1Id)?.name || '—';
+      const p2 = data.players?.find((p) => p.id === m.p2Id)?.name || '—';
+      const sc = m.scores ? `${m.scores[0]} : ${m.scores[1]}` : '—';
+      const w = m.winnerId === m.p1Id ? p1 : m.winnerId === m.p2Id ? p2 : '—';
+      rows.push(`<tr><td>${m.label || ''}</td><td>${p1} vs ${p2}</td><td>${sc}</td><td>${w}</td></tr>`);
+    });
+    rows.push('</tbody></table>');
+  });
+  const win = window.open('', '_blank');
+  if (!win) { alert('請允許彈出視窗以列印'); return; }
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>賽程表</title>
+    <style>body{font-family:system-ui;padding:1.5rem}table{border-collapse:collapse;width:100%;margin-bottom:2rem}
+    th,td{border:1px solid #ccc;padding:8px;text-align:left}h2{margin-top:1.5rem}</style></head><body>
+    <h1>咩咩遊樂園 — 賽程表</h1><p>${new Date().toLocaleString()}</p>${rows.join('')}
+    <script>window.onload=function(){window.print()}<\/script></body></html>`);
+  win.document.close();
+}
+
+function exportStatsReport() {
+  const all = loadTournamentStorage();
+  const lines = ['咩咩遊樂園 — 賽後統計', new Date().toLocaleString(), ''];
+  ['junior', 'senior'].forEach((sk) => {
+    const data = all[sk];
+    if (!data?.players?.length) return;
+    lines.push(sk === 'junior' ? '【低齡組】' : '【高齡組】');
+    const stats = new Map(data.players.map((p) => [p.id, { name: p.name, w: 0, l: 0 }]));
+    getAllMatches(data).forEach((m) => {
+      if (m.status !== 'done' || !m.winnerId) return;
+      const lid = m.winnerId === m.p1Id ? m.p2Id : m.p1Id;
+      if (stats.has(m.winnerId)) stats.get(m.winnerId).w += 1;
+      if (lid && stats.has(lid)) stats.get(lid).l += 1;
+    });
+    [...stats.values()].sort((a, b) => b.w - a.w || a.l - b.l).forEach((s) => {
+      lines.push(`${s.name} — ${s.w} 勝 ${s.l} 負`);
+    });
+    lines.push('');
+  });
+  downloadBlob(`beyblade-stats-${Date.now()}.txt`, new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' }));
+}
+
+function exportAwardsList() {
+  const all = loadTournamentStorage();
+  const lines = ['咩咩遊樂園 — 頒獎名單', new Date().toLocaleString(), ''];
+  ['junior', 'senior'].forEach((sk) => {
+    const data = all[sk];
+    const fin = data?.matches?.final;
+    if (!fin?.winnerId) return;
+    const champ = playerNameFromData(data, fin.winnerId);
+    const runner = fin.winnerId === fin.p1Id ? playerNameFromData(data, fin.p2Id) : playerNameFromData(data, fin.p1Id);
+    const semis = (data.matches.semi || []).map((m) => m.winnerId).filter(Boolean);
+    const top4 = [...new Set([...semis, fin.p1Id, fin.p2Id].filter(Boolean))];
+    lines.push(sk === 'junior' ? '【低齡組】' : '【高齡組】');
+    lines.push(`冠軍：${champ}`);
+    lines.push(`亞軍：${runner}`);
+    lines.push(`四強：${top4.map((id) => playerNameFromData(data, id)).join('、')}`);
+    lines.push('');
+  });
+  downloadBlob(`beyblade-awards-${Date.now()}.txt`, new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' }));
+}
+
+function playerNameFromData(data, id) {
+  if (!id) return '待定';
+  return data.players?.find((p) => p.id === id)?.name || '待定';
 }
 
 function formatMatchScore(match) {
@@ -1046,9 +1192,22 @@ function renderMatchCard(match) {
 
   function slotScore(idx) {
     if (!displayScores) return '';
-    const cls = displayScores[idx] >= 4 ? 'slot-score win' : 'slot-score';
+    const target = typeof getMatchTarget === 'function' ? getMatchTarget() : 4;
+    const cls = displayScores[idx] >= target ? 'slot-score win' : 'slot-score';
     return `<span class="${cls}">${displayScores[idx]}</span>`;
   }
+
+  const adminBtns = match.p1Id && match.p2Id ? `
+    <div class="bracket-admin" data-match-id="${match.id}">
+      ${match.status !== 'done' ? `
+        <button type="button" class="btn btn-xs btn-ghost btn-admin-win" data-side="1" title="P1 勝">P1勝</button>
+        <button type="button" class="btn btn-xs btn-ghost btn-admin-win" data-side="2" title="P2 勝">P2勝</button>
+        <button type="button" class="btn btn-xs btn-ghost btn-admin-walk" data-side="1" title="P1 棄權對手勝">P1棄</button>
+        <button type="button" class="btn btn-xs btn-ghost btn-admin-walk" data-side="2" title="P2 棄權對手勝">P2棄</button>
+      ` : `
+        <button type="button" class="btn btn-xs btn-ghost btn-admin-revert" title="撤銷完場">撤銷</button>
+      `}
+    </div>` : '';
 
   const btnLabel = active ? '▶ 進行中' : match.status === 'done' ? '重新載入' : '開始對戰';
 
@@ -1078,6 +1237,7 @@ function renderMatchCard(match) {
         </span>
       </div>
     </div>
+    ${adminBtns}
     <button type="button" class="btn btn-sm ${active ? 'btn-primary' : 'btn-ghost'} btn-load-match" data-match-id="${match.id}"
       ${!canStart ? 'disabled' : ''}>${btnLabel}</button>
   </li>`;
@@ -1269,6 +1429,28 @@ function renderTournamentUI(options = {}) {
     btn.addEventListener('click', () => setChallengeOpponent(parseInt(btn.dataset.q, 10)));
   });
 
+  bracket.querySelectorAll('.btn-admin-win').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const card = btn.closest('.bracket-match');
+      adminSetMatchWinner(card?.dataset.matchId, parseInt(btn.dataset.side, 10));
+    });
+  });
+  bracket.querySelectorAll('.btn-admin-walk').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const card = btn.closest('.bracket-match');
+      adminWalkover(card?.dataset.matchId, parseInt(btn.dataset.side, 10));
+    });
+  });
+  bracket.querySelectorAll('.btn-admin-revert').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const card = btn.closest('.bracket-match');
+      adminRevertMatch(card?.dataset.matchId);
+    });
+  });
+
   $('#btn-draw-challenge')?.addEventListener('click', () => drawRandomChallengeOpponent(false));
   $('#btn-redraw-challenge')?.addEventListener('click', () => drawRandomChallengeOpponent(true));
 
@@ -1310,6 +1492,9 @@ function initTournament() {
   $('#btn-draw')?.addEventListener('click', runDraw);
   $('#btn-export-csv')?.addEventListener('click', exportTournamentCsv);
   $('#btn-backup-tournament')?.addEventListener('click', backupTournamentJson);
+  $('#btn-print-bracket')?.addEventListener('click', exportPrintableBracket);
+  $('#btn-export-stats')?.addEventListener('click', exportStatsReport);
+  $('#btn-export-awards')?.addEventListener('click', exportAwardsList);
   $('#btn-restore-tournament')?.addEventListener('click', () => $('#restore-tournament-file')?.click());
   $('#restore-tournament-file')?.addEventListener('change', (e) => {
     const file = e.target.files?.[0];
