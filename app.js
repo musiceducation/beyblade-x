@@ -67,6 +67,7 @@ const state = {
   matchOver: false,
   readyForNextRound: false,
   finishHistory: [],
+  victoryMatchId: null,
   cameraStream: null,
   cameraMode: 'local',
   cameraPeer: null,
@@ -127,10 +128,13 @@ function updateScoreDisplay() {
   });
   updateScoreTracks();
   $('#battle-num').textContent = state.currentBattle;
+  const liveBattle = $('#live-replay-battle-num');
+  if (liveBattle) liveBattle.textContent = state.currentBattle;
   if (typeof updateTournamentLiveScores === 'function') {
     updateTournamentLiveScores(state.scores, state.currentBattle);
   }
   pushArenaLiveState();
+  if (typeof updateArgueReplayButton === 'function') updateArgueReplayButton();
 }
 
 let arenaLiveTimer = null;
@@ -183,24 +187,62 @@ function updateArenaSyncBanner() {
   const myId = typeof getOperatorId === 'function' ? getOperatorId() : null;
 
   const issues = [];
-  if (tStatus === 'error' || tStatus === 'offline') issues.push('賽程同步異常');
-  if (cStatus === 'error') issues.push('雲端同步失敗');
+  let primaryIssue = '';
+  if (tStatus === 'error' || tStatus === 'offline') {
+    issues.push('賽程同步異常');
+    primaryIssue = primaryIssue || 'tournament';
+  }
+  if (cStatus === 'error') {
+    issues.push('雲端同步失敗');
+    primaryIssue = primaryIssue || 'cloud';
+  }
   if (lock?.matchId && lock.operatorId !== myId) {
     issues.push(`${lock.operatorLabel || '其他台'} 進行 ${lock.matchLabel || lock.matchId}`);
+    primaryIssue = primaryIssue || 'lock';
   }
+  let pendingReplays = 0;
   if (typeof replayState !== 'undefined') {
-    const pending = replayState.replays.filter((r) => r.videoId && r.cloudSynced === false).length;
-    if (pending > 5) issues.push(`回放待傳 ${pending}`);
+    pendingReplays = replayState.replays.filter((r) => r.videoId && r.cloudSynced === false).length;
+    if (pendingReplays > 0) {
+      issues.push(`回放待傳 ${pendingReplays}`);
+      primaryIssue = primaryIssue || 'replay';
+    }
   }
 
   if (!issues.length) {
     banner.hidden = true;
     banner.textContent = '';
+    delete banner.dataset.primaryIssue;
+    banner.title = '';
     return;
   }
   banner.hidden = false;
   banner.dataset.level = tStatus === 'offline' || cStatus === 'error' ? 'error' : 'warn';
+  banner.dataset.primaryIssue = primaryIssue;
   banner.textContent = issues.join(' · ');
+  banner.title = primaryIssue === 'replay'
+    ? '點一下前往「戰鬥回放」並重試上傳'
+    : primaryIssue === 'cloud'
+      ? '點一下開啟開賽檢查'
+      : '';
+}
+
+function initArenaSyncBanner() {
+  $('#arena-sync-banner')?.addEventListener('click', () => {
+    const issue = $('#arena-sync-banner')?.dataset.primaryIssue;
+    if (issue === 'replay') {
+      if (typeof switchAppView === 'function') switchAppView('replay');
+      if (typeof retryPendingReplayUploads === 'function') {
+        retryPendingReplayUploads().catch(console.error);
+      }
+      if (typeof showToast === 'function') showToast('已前往回放並重試上傳');
+      return;
+    }
+    if (issue === 'cloud' || issue === 'tournament') {
+      $('#event-checklist-modal').hidden = false;
+      if (typeof runEventChecklist === 'function') runEventChecklist();
+    }
+  });
 }
 
 function renderScoreTrack(container, score) {
@@ -294,16 +336,16 @@ function showToast(text) {
 
 let finishAnnounceHideTimer = null;
 
-function showFinishAnnounce(type, player, points) {
+function showFinishAnnounce(type, player, points, playerNameOverride) {
   const overlay = $('#finish-announce');
-  const replayActive = document.body.classList.contains('replay-theater-active');
-  if (replayActive) return;
   if (!overlay) return;
 
   const f = FINISH_LABELS[type];
   if (!f) return;
 
-  const name = nameEls[player - 1]?.value?.trim() || `Blader ${player}`;
+  const name = playerNameOverride
+    || nameEls[player - 1]?.value?.trim()
+    || `Blader ${player}`;
   const enEl = overlay.querySelector('.finish-announce-en');
   const zhEl = overlay.querySelector('.finish-announce-zh');
   const ptsEl = overlay.querySelector('.finish-announce-points');
@@ -320,13 +362,25 @@ function showFinishAnnounce(type, player, points) {
   overlay.classList.add('show');
 
   if (finishAnnounceHideTimer) clearTimeout(finishAnnounceHideTimer);
+  const announceMs = document.body.classList.contains('replay-theater-active') ? 1800 : 2400;
   finishAnnounceHideTimer = setTimeout(() => {
     overlay.classList.remove('show');
     finishAnnounceHideTimer = setTimeout(() => {
       overlay.hidden = true;
       finishAnnounceHideTimer = null;
     }, 400);
-  }, 2400);
+  }, announceMs);
+}
+
+function hideFinishAnnounce() {
+  const overlay = $('#finish-announce');
+  if (finishAnnounceHideTimer) {
+    clearTimeout(finishAnnounceHideTimer);
+    finishAnnounceHideTimer = null;
+  }
+  if (!overlay) return;
+  overlay.classList.remove('show');
+  overlay.hidden = true;
 }
 
 function adjustScore(player, delta) {
@@ -408,32 +462,69 @@ function awardFinish(player, type) {
   updateUndoButton();
 }
 
+function revertMatchEndingFinish(options = {}) {
+  const { requirePin = false } = options;
+  const matchId = state.victoryMatchId;
+  const lastEntry = state.finishHistory[state.finishHistory.length - 1];
+
+  if (!state.matchOver) return false;
+
+  if (matchId && typeof adminRevertMatch === 'function') {
+    const revertOpts = requirePin ? {} : { skipPin: true, silent: true };
+    if (!adminRevertMatch(matchId, revertOpts)) return false;
+  }
+
+  if (lastEntry?.endedMatch) {
+    state.finishHistory.pop();
+    state.scores = [...lastEntry.scoresBefore];
+    lastEntry.logEl?.remove();
+    if (typeof onReplayUndoFinish === 'function') {
+      onReplayUndoFinish(lastEntry.player, lastEntry.type, lastEntry.pts);
+    }
+    addLog(`↩ 已撤銷 ${finishLabel(lastEntry.type)}（P${lastEntry.player} −${lastEntry.pts}）`, 'system');
+  } else {
+    state.finishHistory = [];
+  }
+
+  state.matchOver = false;
+  state.readyForNextRound = true;
+  state.victoryMatchId = null;
+  if (matchId && typeof tournamentState !== 'undefined') {
+    tournamentState.activeMatchId = matchId;
+    if (typeof persistSession === 'function') persistSession();
+    if (typeof renderTournamentUI === 'function') renderTournamentUI();
+  }
+  $('#victory-overlay').hidden = true;
+  updateScoreDisplay();
+  updateUndoButton();
+  showToast('已撤銷完場，可繼續計分');
+  return true;
+}
+
 function undoLastFinish() {
-  if (state.matchOver) {
-    showToast('Match 已結束，無法撤銷得分');
+  const last = state.finishHistory[state.finishHistory.length - 1];
+  if (!last) {
+    showToast('尚無可撤銷的得分');
     return;
   }
 
-  const entry = state.finishHistory.pop();
-  if (!entry) return;
-
-  if (entry.endedMatch) {
-    state.finishHistory.push(entry);
-    showToast('Match 已結束，無法撤銷得分');
+  if (last.endedMatch || state.matchOver) {
+    revertMatchEndingFinish();
     return;
   }
 
-  state.scores = [...entry.scoresBefore];
+  state.finishHistory.pop();
+  state.scores = [...last.scoresBefore];
   state.readyForNextRound = false;
   updateScoreDisplay();
-  entry.logEl?.remove();
+  last.logEl?.remove();
   updateUndoButton();
 
   if (typeof onReplayUndoFinish === 'function') {
-    onReplayUndoFinish(entry.player, entry.type, entry.pts);
+    onReplayUndoFinish(last.player, last.type, last.pts);
   }
 
-  addLog(`↩ 已撤銷 ${finishLabel(entry.type)}（P${entry.player} −${entry.pts}）`, 'system');
+  addLog(`↩ 已撤銷 ${finishLabel(last.type)}（P${last.player} −${last.pts}）`, 'system');
   showToast('已撤銷上一個得分');
 }
 
@@ -441,9 +532,11 @@ function updateUndoButton() {
   const btn = $('#btn-undo-finish');
   if (!btn) return;
   const last = state.finishHistory[state.finishHistory.length - 1];
-  const canUndo = state.finishHistory.length > 0 && !state.matchOver && !last?.endedMatch;
+  const canUndo = state.finishHistory.length > 0 && (!state.matchOver || last?.endedMatch);
   btn.disabled = !canUndo;
-  btn.title = state.matchOver ? 'Match 已結束' : canUndo ? '撤銷上一個得分' : '尚無可撤銷的得分';
+  btn.title = canUndo
+    ? (last?.endedMatch ? '撤銷致勝得分（還原完場）' : '撤銷上一個得分')
+    : (state.matchOver ? 'Match 已結束' : '尚無可撤銷的得分');
   btn.setAttribute('aria-disabled', btn.disabled ? 'true' : 'false');
 }
 
@@ -491,6 +584,9 @@ function nextBattle() {
 function endMatch(winnerIdx) {
   state.matchOver = true;
   state.readyForNextRound = false;
+  state.victoryMatchId = (typeof tournamentState !== 'undefined' && tournamentState.activeMatchId)
+    ? tournamentState.activeMatchId
+    : null;
   const name = nameEls[winnerIdx].value || `Blader ${winnerIdx + 1}`;
   const score = state.scores[winnerIdx];
   const target = getMatchTarget();
@@ -543,6 +639,7 @@ function resetMatchScoresOnly(options = {}) {
   state.matchOver = false;
   state.readyForNextRound = false;
   state.finishHistory = [];
+  state.victoryMatchId = null;
   updateUndoButton();
   updateScoreDisplay();
   $('#victory-overlay').hidden = true;
@@ -605,7 +702,6 @@ let launchEnteredFullscreen = false;
 
 let launchFullscreenActive = false;
 let launchStandbyActive = false;
-let competitionScanPaused = false;
 let scoringLocked = false;
 
 function isCompetitionMode() {
@@ -632,22 +728,6 @@ function setScoringLocked(locked) {
   });
   const nextBtn = $('#btn-next-battle');
   if (nextBtn) nextBtn.disabled = locked || state.matchOver;
-}
-
-function pauseCompetitionBackground() {
-  if (!isCompetitionMode()) return;
-  if (typeof beyScanState !== 'undefined' && beyScanState.enabled && typeof setBeyScanEnabled === 'function') {
-    competitionScanPaused = true;
-    setBeyScanEnabled(false);
-  }
-}
-
-function resumeCompetitionBackground() {
-  if (!competitionScanPaused || typeof setBeyScanEnabled !== 'function') return;
-  competitionScanPaused = false;
-  if (isCompetitionMode() && typeof isBeyScanUiHidden === 'function' && !isBeyScanUiHidden()) {
-    setBeyScanEnabled(true);
-  }
 }
 
 async function warmCompetitionAssets() {
@@ -708,8 +788,8 @@ function showLaunchStandbyHint() {
   }
   if (hint) {
     hint.textContent = touch
-      ? '點下方「開始倒數」或點擊畫面 · ✕ 退出'
-      : '按 Space 或點「開始倒數」· Esc 退出';
+      ? '點下方「開始倒數」或點擊畫面 · Esc 返回賽程'
+      : '按 Space 或點「開始倒數」· Esc 返回賽程';
   }
   if (startBtn) {
     startBtn.hidden = false;
@@ -732,11 +812,14 @@ function hideLaunchStandbyHint() {
 async function enterCameraStandbyMode() {
   if (state.matchOver || launchPlaying) return;
 
-  document.body.classList.remove('launch-live', 'launch-countdown');
+  document.body.classList.remove('launch-countdown');
+  document.body.classList.add('launch-live');
   await enterCameraZoomMode();
 
   launchStandbyActive = true;
   document.body.classList.add('launch-standby');
+  setScoringLocked(true);
+  showLiveReplayButton();
 
   const overlay = $('#launch-camera-overlay');
   overlay.hidden = false;
@@ -768,10 +851,10 @@ async function runLaunchCountdownSequence() {
   overlay.hidden = false;
   overlay.setAttribute('aria-hidden', 'false');
   clearLaunchOverlayText();
-  document.body.classList.add('launch-countdown');
+  document.body.classList.add('launch-countdown', 'launch-live');
   document.body.classList.remove('launch-standby');
   setScoringLocked(true);
-  pauseCompetitionBackground();
+  showLiveReplayButton();
 
   if ($('#voice-countdown').checked && goShootAudio) {
     startLaunchCountdownAudio();
@@ -842,7 +925,11 @@ async function startQuickNextRoundCountdown() {
 }
 
 async function enterBrowserFullscreen() {
-  if (document.fullscreenElement) return;
+  if (document.fullscreenElement) {
+    launchEnteredFullscreen = true;
+    launchFullscreenActive = true;
+    return;
+  }
   try {
     await document.documentElement.requestFullscreen();
     launchEnteredFullscreen = true;
@@ -852,10 +939,10 @@ async function enterBrowserFullscreen() {
 
 function exitBrowserFullscreen() {
   launchFullscreenActive = false;
-  if (launchEnteredFullscreen && document.fullscreenElement) {
+  launchEnteredFullscreen = false;
+  if (document.fullscreenElement) {
     document.exitFullscreen().catch(() => {});
   }
-  launchEnteredFullscreen = false;
 }
 
 function showExitLaunchButton() {
@@ -866,6 +953,17 @@ function showExitLaunchButton() {
 function hideExitLaunchButton() {
   const btn = $('#btn-exit-launch');
   if (btn) btn.hidden = true;
+}
+
+function showLiveReplayButton() {
+  const replay = $('#btn-live-replay');
+  if (replay) replay.hidden = false;
+  if (typeof updateArgueReplayButton === 'function') updateArgueReplayButton();
+}
+
+function hideLiveReplayButton() {
+  const replay = $('#btn-live-replay');
+  if (replay) replay.hidden = true;
 }
 
 function isTouchDevice() {
@@ -934,12 +1032,24 @@ function hideLaunchOverlay() {
   clearLaunchOverlayText();
 }
 
-function exitCameraLaunchMode(overlayDelay = 0) {
+function exitCameraLaunchMode(options = {}) {
+  const opts = typeof options === 'number' ? { overlayDelay: options } : (options || {});
+  const { overlayDelay = 0, keepFullscreen = false, targetView = null } = opts;
+
+  if (!cameraLaunchActive && !document.body.classList.contains('launch-active')) return;
+
   cameraLaunchActive = false;
   launchStandbyActive = false;
   document.body.classList.remove('launch-active', 'launch-countdown', 'launch-live', 'launch-standby');
-  exitBrowserFullscreen();
+
+  if (keepFullscreen) {
+    launchFullscreenActive = !!document.fullscreenElement;
+  } else {
+    exitBrowserFullscreen();
+  }
+
   hideExitLaunchButton();
+  hideLiveReplayButton();
   resetLaunchFx();
   if (launchOverlayHideTimer) {
     clearTimeout(launchOverlayHideTimer);
@@ -954,6 +1064,44 @@ function exitCameraLaunchMode(overlayDelay = 0) {
   if (badge) badge.removeAttribute('data-hint');
   const relaunch = $('#btn-relaunch');
   if (relaunch) relaunch.hidden = true;
+  if (targetView) showAppView(targetView);
+}
+
+async function exitLaunchToTournament() {
+  const inLaunch = cameraLaunchActive || document.body.classList.contains('launch-active');
+  if (inLaunch) {
+    stopLaunchPlayback();
+    exitCameraLaunchMode({ keepFullscreen: true });
+  }
+  showAppView('tournament');
+  if (!document.fullscreenElement) {
+    try {
+      await enterBrowserFullscreen();
+    } catch (_) { /* browser policy */ }
+  }
+}
+
+function stopLaunchPlayback() {
+  launchStandbyActive = false;
+  setScoringLocked(false);
+  if (launchPlaying || launchTimers.length || launchRaf) {
+    launchTimers.forEach(clearTimeout);
+    launchTimers = [];
+    if (launchRaf) cancelAnimationFrame(launchRaf);
+    launchRaf = null;
+    launchPlaying = false;
+    if (goShootAudio) {
+      goShootAudio.pause();
+      goShootAudio.currentTime = 0;
+      goShootAudio.onended = null;
+    }
+  }
+  const el = $('#launch-timer');
+  el.hidden = true;
+  el.textContent = 'Ready';
+  el.classList.remove('counting', 'go-shoot');
+  $('#btn-launch').disabled = false;
+  updateRelaunchButton();
 }
 
 function clearLaunchOverlayText() {
@@ -1168,19 +1316,19 @@ function finishLaunchCountdown() {
   launchPlaying = false;
   state.readyForNextRound = false;
   setScoringLocked(false);
-  resumeCompetitionBackground();
   if (goShootAudio) goShootAudio.onended = null;
   addLog('Three, Two, One, Go Shoot!');
   if (typeof onReplayBattleStart === 'function') onReplayBattleStart();
   document.body.classList.remove('launch-countdown');
   document.body.classList.add('launch-live');
+  showLiveReplayButton();
   if (launchOverlayHideTimer) {
     clearTimeout(launchOverlayHideTimer);
     launchOverlayHideTimer = null;
   }
   launchOverlayHideTimer = setTimeout(hideLaunchOverlay, 200);
   const badge = $('#rec-badge');
-  if (badge) badge.setAttribute('data-hint', isTouchDevice() ? '點右上角退出' : 'Esc 退出全屏');
+  if (badge) badge.setAttribute('data-hint', isTouchDevice() ? '點右上角返回賽程' : 'Esc 返回賽程');
   showExitLaunchButton();
   updateRelaunchButton();
 }
@@ -1223,28 +1371,8 @@ function triggerGoShootMoment() {
 }
 
 function resetLaunchTimer(exitFullscreen = true) {
-  launchStandbyActive = false;
-  setScoringLocked(false);
-  resumeCompetitionBackground();
   if (!exitFullscreen) state.readyForNextRound = false;
-  if (launchPlaying || launchTimers.length || launchRaf) {
-    launchTimers.forEach(clearTimeout);
-    launchTimers = [];
-    if (launchRaf) cancelAnimationFrame(launchRaf);
-    launchRaf = null;
-    launchPlaying = false;
-    if (goShootAudio) {
-      goShootAudio.pause();
-      goShootAudio.currentTime = 0;
-      goShootAudio.onended = null;
-    }
-  }
-  const el = $('#launch-timer');
-  el.hidden = true;
-  el.textContent = 'Ready';
-  el.classList.remove('counting', 'go-shoot');
-  $('#btn-launch').disabled = false;
-  updateRelaunchButton();
+  stopLaunchPlayback();
   if (exitFullscreen) exitCameraLaunchMode();
   else {
     document.body.classList.remove('launch-countdown');
@@ -1435,7 +1563,9 @@ function flashScreen(className = '', duration = 80, peakOpacity = 0.85) {
 }
 
 function getShakeTarget() {
-  if (document.body.classList.contains('replay-theater-active')) return null;
+  if (document.body.classList.contains('replay-theater-active')) {
+    return $('#replay-theater');
+  }
   return document.body.classList.contains('launch-active')
     ? $('#camera-viewport')
     : document.body;
@@ -1461,13 +1591,12 @@ function pulseCamera() {
 }
 
 function triggerFinishEffect(type, player) {
-  const replayActive = document.body.classList.contains('replay-theater-active');
+  const inReplay = document.body.classList.contains('replay-theater-active');
   const inLive = document.body.classList.contains('launch-live');
   const inLaunch = document.body.classList.contains('launch-active');
-  if (replayActive) return;
 
   const color = player === 1 ? '#ff2d55' : '#00d4ff';
-  const liteFx = inLive || inLaunch;
+  const liteFx = inReplay || inLive || inLaunch;
 
   if (type === 'burst') {
     shakeScreen('heavy', liteFx ? 420 : 600);
@@ -1492,7 +1621,7 @@ function triggerFinishEffect(type, player) {
   }
 
   playFinishImpact(type);
-  speakFinishTerm(type);
+  if (!inReplay) speakFinishTerm(type);
 }
 
 function burstRing(color, delay = 0, ringIndex = 1) {
@@ -2654,25 +2783,31 @@ async function copyPlayerLink() {
 
 const VIEW_STORAGE_KEY = 'bex-app-view';
 
-function switchAppView(viewId, persist = true) {
-  if (document.body.classList.contains('launch-active')) return;
-
+function applyAppViewState(viewId) {
   $$('.app-nav-btn').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.view === viewId);
   });
   $$('.app-view').forEach((view) => {
     view.classList.toggle('active', view.id === `view-${viewId}`);
   });
+}
 
-  if (viewId === 'camera') {
-    updateCamSourcePanels();
-  }
-
+function showAppView(viewId, persist = true) {
+  if (persist) sessionStorage.setItem(VIEW_STORAGE_KEY, viewId);
+  applyAppViewState(viewId);
+  if (viewId === 'camera') updateCamSourcePanels();
   if (viewId === 'tournament') {
     updatePlayerQrDisplay().catch(console.error);
+    if (typeof renderTournamentUI === 'function') renderTournamentUI();
   }
+}
 
-  if (persist) sessionStorage.setItem(VIEW_STORAGE_KEY, viewId);
+function switchAppView(viewId, persist = true) {
+  if (document.body.classList.contains('launch-active')) {
+    if (persist) sessionStorage.setItem(VIEW_STORAGE_KEY, viewId);
+    return;
+  }
+  showAppView(viewId, persist);
 }
 
 function initAppViews() {
@@ -2719,15 +2854,7 @@ function init() {
     if (typeof switchAppView === 'function') switchAppView('tournament');
   });
   $('#btn-victory-revert')?.addEventListener('click', () => {
-    const matchId = typeof tournamentState !== 'undefined' ? tournamentState.activeMatchId : null;
-    if (!matchId || typeof adminRevertMatch !== 'function') return;
-    if (adminRevertMatch(matchId)) {
-      state.matchOver = false;
-      state.finishHistory = [];
-      updateUndoButton();
-      $('#victory-overlay').hidden = true;
-      showToast('已撤銷完場，可重新計分');
-    }
+    revertMatchEndingFinish({ requirePin: true });
   });
 
   $$('.btn-score-adj').forEach((btn) => {
@@ -2809,7 +2936,8 @@ function init() {
       }
     }
     if (e.key === 'Escape' && (cameraLaunchActive || document.body.classList.contains('launch-active'))) {
-      resetLaunchTimer();
+      e.preventDefault();
+      exitLaunchToTournament();
     }
     if ((e.key === 'z' || e.key === 'Z') && !e.metaKey && !e.ctrlKey && !e.altKey) {
       const btn = $('#btn-undo-finish');
@@ -2822,13 +2950,12 @@ function init() {
 
   document.addEventListener('fullscreenchange', () => {
     if (document.fullscreenElement) return;
-    if (!launchFullscreenActive || !document.body.classList.contains('launch-active')) return;
-    launchFullscreenActive = false;
-    resetLaunchTimer();
+    if (!document.body.classList.contains('launch-active')) return;
+    exitLaunchToTournament();
   });
 
   $('#btn-exit-launch').addEventListener('click', () => {
-    resetLaunchTimer();
+    exitLaunchToTournament();
   });
   $('#btn-start-countdown')?.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -2862,6 +2989,7 @@ function init() {
   initTournament();
   initReplay();
   initAppViews();
+  initArenaSyncBanner();
   updateUndoButton();
   updateMatchTargetUI();
   if (typeof initArenaAdmin === 'function') initArenaAdmin();

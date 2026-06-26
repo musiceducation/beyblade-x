@@ -14,6 +14,144 @@ export const FINISH_LABELS: Record<string, string> = {
   spin: '停轉',
 };
 
+export const FINISH_ANNOUNCE_LABELS: Record<string, { zh: string; en: string }> = {
+  extreme: { zh: '極致收尾', en: 'Xtreme Finish' },
+  over: { zh: '擊飛結局', en: 'Over Finish' },
+  burst: { zh: '爆裂結局', en: 'Burst Finish' },
+  spin: { zh: '殘存結局', en: 'Spin Finish' },
+};
+
+export const REPLAY_FINISH_FALLBACK_GAP_MS = 2200;
+export const REPLAY_FINISH_MIN_GAP_MS = 2400;
+export const REPLAY_ANNOUNCE_MS = 1800;
+
+export type ReplayFinishEvent = {
+  type: string;
+  player?: number;
+  finishType?: string;
+  points?: number;
+  scores?: number[];
+  ts?: number;
+};
+
+export type FinishScheduleEntry = {
+  event: ReplayFinishEvent;
+  delay: number;
+  videoSeek: number | null;
+};
+
+export function isReplayDebug() {
+  if (typeof window === 'undefined') return false;
+  return localStorage.getItem('bex-replay-debug') === '1'
+    || new URLSearchParams(window.location.search).has('replayDebug');
+}
+
+export function replayDebug(...args: unknown[]) {
+  if (isReplayDebug()) console.log('[replay]', ...args);
+}
+
+export function replayTimelineBase(meta: ReplayMetadata) {
+  const events = meta.events || [];
+  const launch = events.find((e) => e.type === 'launch');
+  const battleStart = events.find((e) => e.type === 'battleStart');
+  return launch?.ts || battleStart?.ts || 0;
+}
+
+export function getReplayStartScores(meta: ReplayMetadata): [number, number] {
+  const fromEvent = meta.events?.find((e) => e.type === 'battleStart')?.scores;
+  if (fromEvent && fromEvent.length >= 2) return [fromEvent[0], fromEvent[1]];
+  if (meta.startScores) return meta.startScores;
+  return [0, 0];
+}
+
+export function buildFinishSchedule(meta: ReplayMetadata, videoDurationSec = 0): FinishScheduleEntry[] {
+  const base = replayTimelineBase(meta);
+  const finishes = (meta.events || []).filter((e) => e.type === 'finish');
+  if (!finishes.length) return [];
+
+  const hasTimestamps = base > 0 && finishes.every((e) => e.ts);
+
+  if (!hasTimestamps) {
+    if (videoDurationSec > 0) {
+      const spanMs = Math.max(2800, videoDurationSec * 1000 * 0.9);
+      const leadMs = Math.min(800, spanMs * 0.08);
+      const tailMs = Math.min(1200, spanMs * 0.1);
+      const usable = Math.max(1200, spanMs - leadMs - tailMs);
+      const step = finishes.length > 1 ? usable / (finishes.length - 1) : 0;
+      return finishes.map((event, i) => {
+        const delay = leadMs + step * i;
+        return { event, delay, videoSeek: delay / 1000 };
+      });
+    }
+    let delay = 500;
+    return finishes.map((event) => {
+      const entry: FinishScheduleEntry = { event, delay, videoSeek: null };
+      delay += REPLAY_FINISH_FALLBACK_GAP_MS;
+      return entry;
+    });
+  }
+
+  let lastDelay = 350;
+  return finishes.map((event) => {
+    const idealDelay = Math.max(350, (event.ts || 0) - base);
+    const delay = lastDelay > 350
+      ? Math.max(idealDelay, lastDelay + REPLAY_FINISH_MIN_GAP_MS)
+      : idealDelay;
+    lastDelay = delay;
+    return {
+      event,
+      delay,
+      videoSeek: Math.max(0, ((event.ts || 0) - base) / 1000),
+    };
+  });
+}
+
+export function waitForVideoReady(video: HTMLVideoElement): Promise<number> {
+  if (!video.src) return Promise.resolve(0);
+  if (video.readyState >= 3 && Number.isFinite(video.duration)) return Promise.resolve(video.duration);
+
+  return new Promise((resolve) => {
+    const done = () => resolve(Number.isFinite(video.duration) ? video.duration : 0);
+    video.addEventListener('canplay', done, { once: true });
+    video.addEventListener('loadedmetadata', () => {
+      if (video.readyState >= 2) done();
+    }, { once: true });
+    window.setTimeout(done, 4000);
+  });
+}
+
+export async function prepareReplayVideo(video: HTMLVideoElement, url: string): Promise<number> {
+  const current = video.currentSrc || video.src || '';
+  if (current !== url && !current.endsWith(url)) {
+    video.src = url;
+  }
+  const duration = await waitForVideoReady(video);
+  try {
+    video.currentTime = 0;
+  } catch { /* seek unsupported */ }
+  try {
+    await video.play();
+    video.muted = false;
+    video.volume = 1;
+  } catch (err) {
+    replayDebug('autoplay blocked', err);
+  }
+  replayDebug('video ready', { duration, url });
+  return duration;
+}
+
+export async function syncReplayVideoTime(video: HTMLVideoElement, targetSec: number) {
+  if (!Number.isFinite(video.duration)) return;
+  const safe = Math.min(Math.max(0, targetSec), Math.max(0, video.duration - 0.05));
+  const drift = Math.abs(video.currentTime - safe);
+  if (drift <= 0.4) return;
+  replayDebug('seek', { from: video.currentTime.toFixed(2), to: safe.toFixed(2) });
+  try {
+    video.currentTime = safe;
+    await video.play();
+  } catch { /* autoplay policy */ }
+}
+
 export type ReplayMetadata = {
   session?: string;
   phase?: string;

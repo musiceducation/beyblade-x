@@ -6,6 +6,9 @@ const REPLAY_LIST_KEY = 'bex-battle-replays-v2';
 const REPLAY_DB_NAME = 'bex-replay-videos';
 const REPLAY_DB_VERSION = 1;
 const MAX_REPLAYS = 60;
+const REPLAY_FINISH_FALLBACK_GAP_MS = 2200;
+const REPLAY_FINISH_MIN_GAP_MS = 2400;
+const REPLAY_ANNOUNCE_MS = 1800;
 
 const replayState = {
   replays: [],
@@ -23,7 +26,19 @@ const replayState = {
   finalizeChain: Promise.resolve(),
   serverUploadPending: 0,
   recordingPaused: sessionStorage.getItem('bex-replay-paused') === '1',
+  debug: false,
+  micStream: null,
 };
+
+function isReplayDebug() {
+  return replayState.debug
+    || localStorage.getItem('bex-replay-debug') === '1'
+    || new URLSearchParams(location.search).has('replayDebug');
+}
+
+function replayDebug(...args) {
+  if (isReplayDebug()) console.log('[replay]', ...args);
+}
 
 function updateReplaySyncStatus() {
   const el = $('#replay-sync-status');
@@ -246,11 +261,6 @@ function stopImgCapture() {
 }
 
 function getRecordableStream() {
-  if (typeof getBeyScanRecordStream === 'function') {
-    const scanStream = getBeyScanRecordStream();
-    if (scanStream) return scanStream;
-  }
-
   if (state.cameraStream) return state.cameraStream;
 
   const video = $('#camera-feed');
@@ -281,6 +291,46 @@ function getRecordableStream() {
   }
 
   return null;
+}
+
+async function ensureReplayMicStream() {
+  if (replayState.micStream?.active) return replayState.micStream;
+  if (!navigator.mediaDevices?.getUserMedia) return null;
+  try {
+    replayState.micStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false,
+    });
+    replayDebug('mic ready', replayState.micStream.getAudioTracks()[0]?.label);
+  } catch (err) {
+    console.warn('Replay mic unavailable', err);
+    return null;
+  }
+  return replayState.micStream;
+}
+
+function releaseReplayMicStream() {
+  replayState.micStream?.getTracks().forEach((t) => t.stop());
+  replayState.micStream = null;
+}
+
+function buildRecordingStream(videoStream) {
+  const tracks = [...videoStream.getVideoTracks()];
+  const audioTracks = videoStream.getAudioTracks();
+  if (audioTracks.length) {
+    tracks.push(...audioTracks);
+  } else if (replayState.micStream?.active) {
+    tracks.push(...replayState.micStream.getAudioTracks());
+  }
+  return new MediaStream(tracks);
+}
+
+function recordingHasAudio(stream) {
+  return stream.getAudioTracks().some((t) => t.enabled && t.readyState === 'live');
 }
 
 function stopReplayRecording(discard = false) {
@@ -326,23 +376,42 @@ function startReplayRecording(sessionId) {
   if (replayState.recordingPaused) return;
   if (replayState.recorder && replayState.recordingSessionId === sessionId) return;
 
-  const startNew = () => {
+  const startNew = async () => {
     replayState.recorderChunks = [];
-    const stream = getRecordableStream();
-    if (!stream || typeof MediaRecorder === 'undefined') return;
+    const videoStream = getRecordableStream();
+    if (!videoStream || typeof MediaRecorder === 'undefined') return;
 
-    const mimeTypes = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+    await ensureReplayMicStream();
+    const stream = buildRecordingStream(videoStream);
+
+    const mimeTypes = [
+      'video/webm;codecs=vp9,opus',
+      'video/webm;codecs=vp8,opus',
+      'video/webm;codecs=vp9',
+      'video/webm;codecs=vp8',
+      'video/webm',
+      'video/mp4',
+    ];
     const mimeType = mimeTypes.find((t) => MediaRecorder.isTypeSupported(t));
     if (!mimeType) return;
 
     try {
-      const rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2500000 });
+      const rec = new MediaRecorder(stream, {
+        mimeType,
+        videoBitsPerSecond: 2500000,
+        audioBitsPerSecond: recordingHasAudio(stream) ? 128000 : undefined,
+      });
       rec.ondataavailable = (e) => {
         if (e.data?.size) replayState.recorderChunks.push(e.data);
       };
       rec.start(1000);
       replayState.recorder = rec;
       replayState.recordingSessionId = sessionId;
+      replayDebug('recording', {
+        mimeType,
+        audio: recordingHasAudio(stream),
+      });
+      updateArgueReplayButton();
     } catch (err) {
       console.warn('Replay recording unavailable', err);
     }
@@ -352,7 +421,7 @@ function startReplayRecording(sessionId) {
     stopReplayRecording(true).then(startNew).catch(startNew);
     return;
   }
-  startNew();
+  startNew().catch(console.error);
 }
 
 function sessionHasActivity(session) {
@@ -411,6 +480,7 @@ function recordReplayLaunch() {
   const session = ensureReplaySession(state.currentBattle);
   session.events.push({ type: 'launch', battle: state.currentBattle, ts: Date.now() });
   startReplayRecording(session.id);
+  updateArgueReplayButton();
 }
 
 function recordReplayFinish(player, finishType, points, scores) {
@@ -424,6 +494,7 @@ function recordReplayFinish(player, finishType, points, scores) {
     battle: state.currentBattle,
     ts: Date.now(),
   });
+  updateArgueReplayButton();
 }
 
 function onReplayUndoFinish(player, finishType, points) {
@@ -559,6 +630,7 @@ async function finalizeReplaySession(session, finalScores, options = {}) {
   }
   saveReplayList();
   renderReplayList();
+  updateArgueReplayButton();
   if (session.serverSynced !== true) {
     session.serverSynced = false;
     session.cloudSynced = false;
@@ -632,25 +704,46 @@ function formatReplayOffset(ms) {
   return m > 0 ? `${m}:${String(s).padStart(2, '0')}` : `${s}s`;
 }
 
-function buildFinishSchedule(replay) {
+function buildFinishSchedule(replay, videoDurationSec = 0) {
   const base = replayTimelineBase(replay);
   const finishes = replay.events.filter((e) => e.type === 'finish');
+  if (!finishes.length) return [];
+
   const hasTimestamps = base > 0 && finishes.every((e) => e.ts);
 
   if (!hasTimestamps) {
+    if (videoDurationSec > 0) {
+      const spanMs = Math.max(2800, videoDurationSec * 1000 * 0.9);
+      const leadMs = Math.min(800, spanMs * 0.08);
+      const tailMs = Math.min(1200, spanMs * 0.1);
+      const usable = Math.max(1200, spanMs - leadMs - tailMs);
+      const step = finishes.length > 1 ? usable / (finishes.length - 1) : 0;
+      return finishes.map((event, i) => {
+        const delay = leadMs + step * i;
+        return { event, delay, videoSeek: delay / 1000 };
+      });
+    }
     let delay = 500;
     return finishes.map((event) => {
       const entry = { event, delay, videoSeek: null };
-      delay += 1700;
+      delay += REPLAY_FINISH_FALLBACK_GAP_MS;
       return entry;
     });
   }
 
-  return finishes.map((event) => ({
-    event,
-    delay: Math.max(350, event.ts - base),
-    videoSeek: Math.max(0, (event.ts - base) / 1000),
-  }));
+  let lastDelay = 350;
+  return finishes.map((event) => {
+    const idealDelay = Math.max(350, event.ts - base);
+    const delay = lastDelay > 350
+      ? Math.max(idealDelay, lastDelay + REPLAY_FINISH_MIN_GAP_MS)
+      : idealDelay;
+    lastDelay = delay;
+    return {
+      event,
+      delay,
+      videoSeek: Math.max(0, (event.ts - base) / 1000),
+    };
+  });
 }
 
 function renderReplayEvents(replay) {
@@ -885,6 +978,143 @@ function updateReplayHud(replay, scores, label) {
   if (hudLabel && label) hudLabel.textContent = label;
 }
 
+async function flushLiveRecordingBlob() {
+  const rec = replayState.recorder;
+  const mime = rec?.mimeType || 'video/webm';
+  if (rec?.state === 'recording') {
+    await new Promise((resolve) => {
+      const onData = (e) => {
+        if (e.data?.size) replayState.recorderChunks.push(e.data);
+        rec.removeEventListener('dataavailable', onData);
+        resolve();
+      };
+      rec.addEventListener('dataavailable', onData, { once: true });
+      try {
+        rec.requestData();
+      } catch {
+        resolve();
+      }
+      window.setTimeout(resolve, 450);
+    });
+  }
+  if (!replayState.recorderChunks.length) return null;
+  return new Blob(replayState.recorderChunks, { type: mime });
+}
+
+function getCurrentMatchReplays() {
+  const ctx = getReplayContext();
+  const key = replayContextKey(ctx);
+  const gid = replayState.activeMatchGroupId || replayState.session?.matchGroupId;
+  if (!gid) return [];
+  return replayState.replays
+    .filter((r) => {
+      if ((r.matchGroupId || r.id) !== gid) return false;
+      if (!r.contextKey) return true;
+      return r.contextKey === key;
+    })
+    .sort((a, b) => b.battleNum - a.battleNum || (b.createdAt || '').localeCompare(a.createdAt || ''));
+}
+
+function hasArgueReplaySource() {
+  if (replayState.recorderChunks.length > 0) return true;
+  const session = replayState.session;
+  if (session?.events?.some((e) => e.type === 'launch' || e.type === 'finish')) return true;
+  return getCurrentMatchReplays().some((r) =>
+    (r.events || []).some((e) => e.type === 'finish'));
+}
+
+function updateArgueReplayButton() {
+  const buttons = [$('#btn-argue-replay'), $('#btn-live-replay')];
+  const available = hasArgueReplaySource();
+  const playing = document.body.classList.contains('replay-playing');
+  buttons.forEach((btn) => {
+    if (!btn) return;
+    btn.disabled = false;
+    btn.classList.toggle('is-idle', !available || playing);
+    btn.title = available
+      ? '爭議時立即重播本局（含現場收音）'
+      : '需先 Go Shoot 或已有得分紀錄';
+  });
+}
+
+async function finishArguePlayback(tempVideoUrl) {
+  document.body.classList.remove('replay-playing');
+  hideReplayTheater();
+  restoreLiveBattleState();
+  setReplayControlsDisabled(false);
+  if (replayState.playback?.videoUrl === tempVideoUrl) {
+    replayState.playback = null;
+  }
+  if (tempVideoUrl?.startsWith('blob:')) {
+    URL.revokeObjectURL(tempVideoUrl);
+  }
+  updateArgueReplayButton();
+}
+
+async function playArgueReplay() {
+  if (document.body.classList.contains('replay-playing')) return;
+  if (!hasArgueReplaySource()) {
+    if (typeof showToast === 'function') showToast('需先按 Go Shoot 開始錄製，或本局已有得分');
+    return;
+  }
+
+  const session = replayState.session;
+  const hasLiveSession = session?.events?.some((e) => e.type === 'launch' || e.type === 'finish');
+
+  if (hasLiveSession) {
+    const blob = await flushLiveRecordingBlob();
+    const replay = {
+      ...session,
+      p1Name: session.p1Name || nameEls[0]?.value?.trim() || 'Blader 1',
+      p2Name: session.p2Name || nameEls[1]?.value?.trim() || 'Blader 2',
+      finalScores: sessionFinalScores(session),
+      startScores: session.startScores
+        || session.events.find((e) => e.type === 'battleStart')?.scores
+        || [0, 0],
+    };
+
+    let videoUrl = null;
+    if (blob?.size > 1024) videoUrl = trackVideoUrl(URL.createObjectURL(blob));
+
+    saveLiveBattleState();
+    replayState.playback = { replay, rounds: [replay], videoUrl, timers: [], cancelled: false };
+    document.body.classList.add('replay-playing');
+    setReplayControlsDisabled(true);
+    updateArgueReplayButton();
+
+    if (typeof showToast === 'function') {
+      showToast(videoUrl ? '爭議回放（含收音）' : '爭議回放（得分紀錄）');
+    }
+
+    await playReplayRound(replay, videoUrl, { roundIndex: 0, roundTotal: 1 });
+
+    if (!replayState.playback?.cancelled) {
+      await finishArguePlayback(videoUrl);
+    }
+    return;
+  }
+
+  const saved = getCurrentMatchReplays().find((r) =>
+    (r.events || []).some((e) => e.type === 'finish'));
+  if (!saved) {
+    if (typeof showToast === 'function') showToast('尚無可重播的內容');
+    return;
+  }
+
+  const videoUrl = await loadReplayVideoUrl(saved);
+  saveLiveBattleState();
+  replayState.playback = { replay: saved, rounds: [saved], videoUrl, timers: [], cancelled: false };
+  document.body.classList.add('replay-playing');
+  setReplayControlsDisabled(true);
+  updateArgueReplayButton();
+
+  await playReplayRound(saved, videoUrl, { roundIndex: 0, roundTotal: 1 });
+
+  if (!replayState.playback?.cancelled) {
+    await finishArguePlayback(videoUrl?.startsWith('blob:') ? videoUrl : null);
+  }
+}
+
 function pulseReplayHudScore(player) {
   const scoreEl = player === 1 ? $('#replay-hud-s1') : $('#replay-hud-s2');
   if (!scoreEl) return;
@@ -894,19 +1124,25 @@ function pulseReplayHudScore(player) {
   setTimeout(() => scoreEl.classList.remove('replay-hud-pop'), 420);
 }
 
-function playReplayFinishFeedback(event) {
+function playReplayFinishFeedback(event, replay) {
   pulseReplayHudScore(event.player);
-  if (typeof playBeep === 'function') {
-    const beeps = { burst: [120, 0.15], extreme: [80, 0.25], over: [300, 0.1], spin: [520, 0.06] };
-    const [freq, dur] = beeps[event.finishType] || beeps.spin;
-    playBeep(freq, dur);
+  const playerName = event.player === 1 ? replay.p1Name : replay.p2Name;
+  if (typeof showFinishAnnounce === 'function') {
+    showFinishAnnounce(event.finishType, event.player, event.points, playerName);
+  }
+  if (typeof triggerFinishEffect === 'function') {
+    triggerFinishEffect(event.finishType, event.player);
   }
 }
 
 function hideReplayTheater() {
   const theater = $('#replay-theater');
   const tv = $('#replay-theater-video');
+  if (typeof hideFinishAnnounce === 'function') hideFinishAnnounce();
+  if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+  theater?.classList.remove('shake', 'shake-heavy', 'shake-go-shoot');
   if (tv) {
+    detachTheaterVideoGuard(tv);
     tv.pause();
     tv.removeAttribute('src');
     tv.classList.add('no-video');
@@ -917,16 +1153,77 @@ function hideReplayTheater() {
   document.body.classList.remove('replay-theater-active');
 }
 
-async function waitForTheaterVideoMeta() {
-  const tv = $('#replay-theater-video');
-  if (!tv?.src) return 0;
-  if (tv.readyState >= 1 && Number.isFinite(tv.duration)) return tv.duration;
+function theaterVideoSrcMatches(tv, videoUrl) {
+  if (!tv || !videoUrl) return false;
+  try {
+    const current = tv.currentSrc || tv.src || '';
+    return current === videoUrl || current.endsWith(videoUrl);
+  } catch {
+    return false;
+  }
+}
+
+function waitForTheaterVideoReady(tv) {
+  if (!tv?.src) return Promise.resolve(0);
+  if (tv.readyState >= 3 && Number.isFinite(tv.duration)) return Promise.resolve(tv.duration);
 
   return new Promise((resolve) => {
-    const finish = () => resolve(Number.isFinite(tv.duration) ? tv.duration : 0);
-    tv.addEventListener('loadedmetadata', finish, { once: true });
-    setTimeout(finish, 2500);
+    const done = () => resolve(Number.isFinite(tv.duration) ? tv.duration : 0);
+    tv.addEventListener('canplay', done, { once: true });
+    tv.addEventListener('loadedmetadata', () => {
+      if (tv.readyState >= 2) done();
+    }, { once: true });
+    setTimeout(done, 4000);
   });
+}
+
+async function prepareTheaterVideo(tv, videoUrl) {
+  if (!tv || !videoUrl) return 0;
+  if (!theaterVideoSrcMatches(tv, videoUrl)) {
+    tv.src = videoUrl;
+  }
+  tv.classList.remove('no-video');
+  attachTheaterVideoGuard(tv);
+  const duration = await waitForTheaterVideoReady(tv);
+  try {
+    tv.currentTime = 0;
+  } catch (_) { /* seek unsupported */ }
+  try {
+    await tv.play();
+    tv.muted = false;
+    tv.volume = 1;
+  } catch (err) {
+    replayDebug('autoplay blocked', err);
+  }
+  replayDebug('video ready', { duration, src: videoUrl });
+  return duration;
+}
+
+async function syncTheaterVideoTime(tv, targetSec) {
+  if (!tv || targetSec == null || !Number.isFinite(tv.duration)) return;
+  const safe = Math.min(Math.max(0, targetSec), Math.max(0, tv.duration - 0.05));
+  const drift = Math.abs(tv.currentTime - safe);
+  if (drift <= 0.4) return;
+  replayDebug('seek', { from: tv.currentTime.toFixed(2), to: safe.toFixed(2) });
+  try {
+    tv.currentTime = safe;
+    await tv.play();
+  } catch (_) { /* autoplay policy */ }
+}
+
+function attachTheaterVideoGuard(tv) {
+  if (!tv || tv.dataset.replayGuard === '1') return;
+  tv.dataset.replayGuard = '1';
+  tv.addEventListener('pause', () => {
+    if (!document.body.classList.contains('replay-playing') || replayState.playback?.cancelled) return;
+    if (tv.ended) return;
+    tv.play().catch(() => {});
+  });
+}
+
+function detachTheaterVideoGuard(tv) {
+  if (!tv) return;
+  delete tv.dataset.replayGuard;
 }
 
 async function showReplayTheater(replay, videoUrl) {
@@ -944,11 +1241,9 @@ async function showReplayTheater(replay, videoUrl) {
 
   if (videoUrl) {
     tv.classList.remove('no-video');
-    tv.src = videoUrl;
-    tv.currentTime = 0;
-    try {
-      await tv.play();
-    } catch (_) { /* autoplay policy */ }
+    if (!theaterVideoSrcMatches(tv, videoUrl)) {
+      tv.src = videoUrl;
+    }
   } else {
     tv.pause();
     tv.removeAttribute('src');
@@ -980,6 +1275,7 @@ function stopReplayPlayback(options = {}) {
   restoreLiveBattleState();
   document.body.classList.remove('replay-playing');
   setReplayControlsDisabled(false);
+  updateArgueReplayButton();
 
   if (!keepPanel) {
     revokeVideoUrls();
@@ -1129,61 +1425,73 @@ function waitMs(ms) {
   });
 }
 
-function playReplayRound(replay, videoUrl, options = {}) {
+async function playReplayRound(replay, videoUrl, options = {}) {
   const { roundIndex = 0, roundTotal = 1 } = options;
 
-  return new Promise((resolve) => {
-    if (!replayState.playback || replayState.playback.cancelled) {
-      resolve();
-      return;
-    }
+  if (!replayState.playback || replayState.playback.cancelled) return;
 
-    replayState.playback.replay = replay;
-    replayState.playback.videoUrl = videoUrl;
+  replayState.playback.replay = replay;
+  replayState.playback.videoUrl = videoUrl;
 
-    const startEvent = replay.events.find((e) => e.type === 'battleStart');
-    const startScores = [...(startEvent?.scores || replay.startScores || [0, 0])];
+  const startEvent = replay.events.find((e) => e.type === 'battleStart');
+  const startScores = [...(startEvent?.scores || replay.startScores || [0, 0])];
 
-    const roundLabel = roundTotal > 1
-      ? `整場回放 · 第 ${roundIndex + 1}/${roundTotal} 局`
-      : (videoUrl ? '回放中…' : '重播得分（無影片）');
+  const roundLabel = roundTotal > 1
+    ? `整場回放 · 第 ${roundIndex + 1}/${roundTotal} 局`
+    : (videoUrl ? '回放中…' : '重播得分（無影片）');
 
-    showReplayTheater(replay, videoUrl).then(async () => {
-      updateReplayHud(replay, startScores, roundLabel);
-      renderReplayEvents(replay);
-      renderReplayRoundTabs(replayState.playback.rounds, replay.id);
-      renderReplayList();
+  await showReplayTheater(replay, videoUrl);
+  if (!replayState.playback || replayState.playback.cancelled) return;
 
-      const schedule = buildFinishSchedule(replay);
-      const videoDuration = videoUrl ? await waitForTheaterVideoMeta() : 0;
-      const tv = $('#replay-theater-video');
-      let lastDelay = 350;
+  updateReplayHud(replay, startScores, roundLabel);
+  renderReplayEvents(replay);
+  renderReplayRoundTabs(replayState.playback.rounds, replay.id);
+  renderReplayList();
 
-      schedule.forEach((entry) => {
-        lastDelay = Math.max(lastDelay, entry.delay);
-        scheduleReplayStep(() => {
-          if (!replayState.playback || replayState.playback.cancelled) return;
+  const tv = $('#replay-theater-video');
+  let videoDuration = 0;
+  if (videoUrl && tv) {
+    videoDuration = await prepareTheaterVideo(tv, videoUrl);
+  }
+  if (!replayState.playback || replayState.playback.cancelled) return;
 
-          if (videoUrl && tv && entry.videoSeek != null && Number.isFinite(tv.duration)) {
-            try {
-              tv.currentTime = Math.min(entry.videoSeek, Math.max(0, tv.duration - 0.05));
-            } catch (_) { /* seek unsupported */ }
-          }
-
-          updateReplayHud(replay, entry.event.scores, roundLabel);
-          playReplayFinishFeedback(entry.event);
-        }, entry.delay);
-      });
-
-      const endDelay = Math.max(
-        lastDelay + 1200,
-        videoDuration > 0 ? videoDuration * 1000 + 400 : 0,
-        schedule.length ? schedule[schedule.length - 1].delay + 1200 : 800,
-      );
-
-      scheduleReplayStep(() => resolve(), endDelay);
-    });
+  const schedule = buildFinishSchedule(replay, videoDuration);
+  replayDebug('round', {
+    id: replay.id,
+    battleNum: replay.battleNum,
+    videoDuration,
+    finishes: schedule.length,
+    schedule: schedule.map((e) => ({
+      delay: e.delay,
+      seek: e.videoSeek,
+      type: e.event.finishType,
+      player: e.event.player,
+    })),
   });
+
+  let lastDelay = 350;
+  schedule.forEach((entry) => {
+    lastDelay = Math.max(lastDelay, entry.delay);
+    scheduleReplayStep(() => {
+      if (!replayState.playback || replayState.playback.cancelled) return;
+
+      if (videoUrl && tv && entry.videoSeek != null) {
+        syncTheaterVideoTime(tv, entry.videoSeek).catch(() => {});
+      }
+
+      updateReplayHud(replay, entry.event.scores, roundLabel);
+      playReplayFinishFeedback(entry.event, replay);
+    }, entry.delay);
+  });
+
+  const tailMs = videoUrl ? 1500 : 800;
+  const endDelay = Math.max(
+    lastDelay + tailMs,
+    videoDuration > 0 ? videoDuration * 1000 + 300 : 0,
+    schedule.length ? schedule[schedule.length - 1].delay + tailMs : 600,
+  );
+
+  await waitMs(endDelay);
 }
 
 async function playReplayScores() {
@@ -1253,6 +1561,7 @@ async function clearAllReplays() {
   stopReplayPlayback();
   discardReplaySession();
   resetMatchGroup();
+  releaseReplayMicStream();
 
   const ids = replayState.replays.filter((r) => r.videoId).map((r) => r.videoId);
   replayState.replays = [];
@@ -1288,6 +1597,10 @@ async function clearAllReplays() {
 }
 
 function initReplay() {
+  if (isReplayDebug()) {
+    replayState.debug = true;
+    console.info('[replay] debug mode on (?replayDebug=1)');
+  }
   loadReplayList();
   renderReplayList();
   syncReplayListFromServer();
@@ -1343,11 +1656,14 @@ function initReplay() {
   $('#btn-replay-stop')?.addEventListener('click', () => stopReplayPlayback({ keepPanel: true }));
   $('#btn-replay-close')?.addEventListener('click', stopReplayPlayback);
   $('#btn-replay-theater-stop')?.addEventListener('click', () => stopReplayPlayback({ keepPanel: true }));
+  $('#btn-argue-replay')?.addEventListener('click', () => { playArgueReplay().catch(console.error); });
+  $('#btn-live-replay')?.addEventListener('click', () => { playArgueReplay().catch(console.error); });
   $('#btn-clear-replays')?.addEventListener('click', clearAllReplays);
   $('#btn-replay-pause-upload')?.addEventListener('click', () => {
     setReplayRecordingPaused(!replayState.recordingPaused);
   });
   updateReplayPauseUi();
+  updateArgueReplayButton();
 
   const replayParam = new URLSearchParams(location.search).get('replay');
   if (replayParam) {
@@ -1374,6 +1690,7 @@ function onReplayMatchEnd(winnerIdx, scores, battles) {
   const session = replayState.session;
   if (!session) return;
   replayState.session = null;
+  releaseReplayMicStream();
   return queueReplayFinalize(() => finalizeReplaySession(session, scores, {
     battleNum: battles,
     matchEnd: true,
@@ -1387,5 +1704,6 @@ function onReplayDiscard() {
 }
 
 function onReplayNewMatch() {
+  releaseReplayMicStream();
   resetMatchGroup();
 }

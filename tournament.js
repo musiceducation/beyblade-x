@@ -826,8 +826,10 @@ function adminRevertMatch(matchId, options = {}) {
     else if (m.id === matchId) adminResetMatchFields(m);
   });
 
-  if (typeof state !== 'undefined' && state.matchOver && tournamentState.activeMatchId === matchId && typeof resetMatchScoresOnly === 'function') {
-    resetMatchScoresOnly();
+  if (!options.skipScoreboardReset && typeof state !== 'undefined' && state.matchOver && typeof resetMatchScoresOnly === 'function') {
+    const onScoreboard = state.victoryMatchId === matchId
+      || tournamentState.activeMatchId === matchId;
+    if (onScoreboard) resetMatchScoresOnly();
   }
 
   advanceWinners();
@@ -1167,9 +1169,8 @@ async function loadMatchToScoreboard(matchId) {
 
   if (useCameraStandby && typeof enterCameraStandbyMode === 'function') {
     if (typeof switchAppView === 'function') switchAppView('camera');
-    enterCameraStandbyMode()
-      .then(() => (typeof enterBrowserFullscreen === 'function' ? enterBrowserFullscreen() : undefined))
-      .catch(console.error);
+    if (typeof applyAppViewState === 'function') applyAppViewState('camera');
+    enterCameraStandbyMode().catch(console.error);
   } else if (typeof switchAppView === 'function') {
     switchAppView('battle');
   }
@@ -1647,4 +1648,10 @@ function initTournament() {
   $('#btn-sync-use-remote')?.addEventListener('click', () => resolveSyncConflict(true));
   $('#btn-sync-keep-local')?.addEventListener('click', () => resolveSyncConflict(false));
   $('#btn-reset-bracket')?.addEventListener('click', resetTournament);
+
+  document.querySelectorAll('.tournament-tools-menu button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      btn.closest('details')?.removeAttribute('open');
+    });
+  });
 }

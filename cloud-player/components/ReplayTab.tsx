@@ -19,6 +19,7 @@ import {
 } from '@/lib/replay';
 import { filterReplaysBySession } from '@/lib/tournament';
 import { replayVideoUrl } from '@/lib/supabase';
+import ReplayTheater, { ReplayTheaterMode } from '@/components/ReplayTheater';
 
 type Props = {
   replays: ArenaReplayRow[];
@@ -63,6 +64,11 @@ export default function ReplayTab({
   const [downloadStatus, setDownloadStatus] = useState<'idle' | 'downloading'>('idle');
   const [batchGroupId, setBatchGroupId] = useState<string | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
+  const [theater, setTheater] = useState<{
+    mode: ReplayTheaterMode;
+    roundId: string;
+    rounds: ArenaReplayRow[];
+  } | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
 
   const filteredReplays = useMemo(
@@ -109,6 +115,11 @@ export default function ReplayTab({
     }).catch(() => window.prompt('複製連結：', url));
   };
 
+  const openTheater = (mode: ReplayTheaterMode, roundsForMatch = activeGroup) => {
+    if (!activeReplay || !roundsForMatch?.length) return;
+    setTheater({ mode, roundId: activeReplay.id, rounds: roundsForMatch });
+  };
+
   const downloadGroup = async (rounds: ArenaReplayRow[]) => {
     const gid = rounds[0]?.match_group_id || rounds[0]?.id;
     if (!gid) return;
@@ -144,6 +155,14 @@ export default function ReplayTab({
       className={`player-section player-replay-layout${activeReplay ? ' has-player' : ''}`}
       aria-label="戰鬥回放"
     >
+      {theater && (
+        <ReplayTheater
+          rounds={theater.rounds}
+          initialRoundId={theater.roundId}
+          mode={theater.mode}
+          onClose={() => setTheater(null)}
+        />
+      )}
       <div className="player-replay-stats">
         <span>
           <strong>{replayGroups.length}</strong>
@@ -215,6 +234,28 @@ export default function ReplayTab({
               )}
             </div>
             <div className="player-replay-actions">
+              {activeMeta && replayFinishEvents(activeMeta).length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    className="player-replay-action player-replay-action--accent"
+                    disabled={!!theater}
+                    onClick={() => openTheater('single')}
+                  >
+                    ▶ 重播得分
+                  </button>
+                  {(activeGroup?.length ?? 0) > 1 && (
+                    <button
+                      type="button"
+                      className="player-replay-action"
+                      disabled={!!theater}
+                      onClick={() => openTheater('match')}
+                    >
+                      ▶ 整場回放
+                    </button>
+                  )}
+                </>
+              )}
               {activeReplay.has_video ? (
                 <>
                   <button
@@ -283,10 +324,23 @@ export default function ReplayTab({
                     <button
                       type="button"
                       className="replay-group-batch-dl"
-                      disabled={batchGroupId === (rounds[0].match_group_id || rounds[0].id)}
+                      disabled={batchGroupId === (rounds[0].match_group_id || rounds[0].id) || !!theater}
                       onClick={() => downloadGroup(rounds)}
                     >
                       {batchGroupId === (rounds[0].match_group_id || rounds[0].id) ? '下載中…' : '⬇ 整場'}
+                    </button>
+                  )}
+                  {rounds.some((r) => replayFinishEvents(replayMeta(r)).length > 0) && (
+                    <button
+                      type="button"
+                      className="replay-group-batch-play"
+                      disabled={!!theater}
+                      onClick={() => {
+                        onSelectReplay(rounds[0].id);
+                        setTheater({ mode: 'match', roundId: rounds[0].id, rounds });
+                      }}
+                    >
+                      ▶ 整場回放
                     </button>
                   )}
                 </div>

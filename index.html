@@ -42,14 +42,19 @@
     </div>
     <div id="launch-camera-text" class="launch-camera-text"></div>
     <button id="btn-start-countdown" class="btn-start-countdown" type="button" hidden>開始倒數</button>
-    <p class="launch-camera-hint">按 Esc 或右上角 ✕ 退出</p>
+    <p class="launch-camera-hint">Esc 或右上角 ✕ 返回賽程（保持全螢幕）</p>
   </div>
 
   <button id="btn-relaunch" class="btn-relaunch" type="button" hidden>
     321 · Go Shoot!
   </button>
 
-  <button id="btn-exit-launch" class="btn-exit-launch" type="button" hidden aria-label="退出全屏">✕ 退出</button>
+  <button id="btn-exit-launch" class="btn-exit-launch" type="button" hidden aria-label="返回賽程">✕ 賽程</button>
+
+  <button id="btn-live-replay" class="btn-live-replay" type="button" hidden title="爭議時立即重播本局（含現場收音）">
+    <span class="btn-live-replay-round">第 <span id="live-replay-battle-num">1</span> 局</span>
+    <span class="btn-live-replay-label">重播</span>
+  </button>
 
   <header class="arena-header">
     <div class="logo-block">
@@ -83,8 +88,6 @@
       <label class="header-station" title="計分台名稱">
         <input id="station-name-input" class="station-name-input" type="text" placeholder="台 1" maxlength="40" aria-label="計分台名稱">
       </label>
-      <a href="queue.html" class="btn btn-ghost" target="_blank" rel="noopener" title="叫號看板">📺</a>
-      <a href="setup.html" class="btn btn-ghost" target="_blank" rel="noopener" title="HTTPS 設定">🔒</a>
       <button id="btn-fullscreen" class="btn btn-ghost" title="全螢幕">⛶</button>
       <button id="btn-event-checklist" class="btn btn-ghost" type="button" title="開賽檢查">✅</button>
       <button id="btn-admin-settings" class="btn btn-ghost" type="button" title="管理設定">⚙</button>
@@ -92,7 +95,7 @@
     </div>
   </header>
 
-  <div id="arena-sync-banner" class="arena-sync-banner" hidden role="status" aria-live="polite"></div>
+  <button type="button" id="arena-sync-banner" class="arena-sync-banner" hidden aria-live="polite"></button>
 
   <nav class="app-nav" aria-label="主界面">
     <button type="button" class="app-nav-btn active" data-view="battle">⚔ 對戰計分</button>
@@ -167,6 +170,7 @@
         </div>
         <audio id="go-shoot-audio" preload="auto" src="beyblade-burst-sparking--shu-321-go-shoot.mp3"></audio>
         <button id="btn-next-battle" class="btn btn-ghost btn-sm">下一局</button>
+        <button id="btn-argue-replay" class="btn btn-ghost btn-sm" type="button" title="爭議時立即重播本局（含現場收音）">重播</button>
         <button id="btn-undo-finish" class="btn btn-ghost btn-sm" type="button" disabled title="撤銷上一個得分">↩ 撤銷</button>
       </div>
 
@@ -217,15 +221,20 @@
           <span id="cloud-sync-status" class="tournament-sync-status cloud-sync-status" data-status="idle" title="Supabase 雲端" hidden>雲端</span>
           <span id="draw-status" class="draw-badge">未抽籤</span>
           <button id="btn-draw" class="btn btn-sm btn-primary" type="button">🎲 抽籤配對</button>
-          <button id="btn-export-csv" class="btn btn-sm btn-ghost" type="button">匯出 CSV</button>
-          <button id="btn-print-bracket" class="btn btn-sm btn-ghost" type="button">列印</button>
-          <button id="btn-export-stats" class="btn btn-sm btn-ghost" type="button">統計</button>
-          <button id="btn-export-awards" class="btn btn-sm btn-ghost" type="button">頒獎</button>
-          <button id="btn-share-schedule" class="btn btn-sm btn-ghost" type="button">分享</button>
-          <button id="btn-backup-tournament" class="btn btn-sm btn-ghost" type="button">備份</button>
-          <button id="btn-restore-tournament" class="btn btn-sm btn-ghost" type="button">還原</button>
+          <button id="btn-share-schedule" class="btn btn-sm btn-ghost" type="button" title="複製賽程文字到剪貼簿">分享賽程</button>
+          <details class="tournament-tools-menu">
+            <summary class="btn btn-sm btn-ghost">匯出／備份 ▾</summary>
+            <div class="tournament-tools-panel">
+              <button id="btn-export-csv" class="btn btn-sm btn-ghost" type="button">匯出 CSV</button>
+              <button id="btn-print-bracket" class="btn btn-sm btn-ghost" type="button">列印賽程</button>
+              <button id="btn-export-stats" class="btn btn-sm btn-ghost" type="button">統計報表</button>
+              <button id="btn-export-awards" class="btn btn-sm btn-ghost" type="button">頒獎名單</button>
+              <button id="btn-backup-tournament" class="btn btn-sm btn-ghost" type="button">備份 JSON</button>
+              <button id="btn-restore-tournament" class="btn btn-sm btn-ghost" type="button">還原 JSON</button>
+              <button id="btn-reset-bracket" class="btn btn-sm btn-ghost tournament-tools-danger" type="button">重設賽程</button>
+            </div>
+          </details>
           <input id="restore-tournament-file" type="file" accept="application/json,.json" hidden>
-          <button id="btn-reset-bracket" class="btn btn-sm btn-ghost" type="button">重設賽程</button>
         </div>
       </div>
       <p class="tournament-rundown">比賽流程：初賽 → 復活賽（僅初賽落敗）→ 複賽（落敗直接淘汰）→ 四強挑戰 → 準決賽 → 決賽 · 無季軍戰 · 賽程表可直接改分、設勝負、雙擊進入計分</p>
@@ -234,13 +243,19 @@
           <img id="player-qr" class="player-qr-img" alt="選手查閱 QR" width="140" height="140" hidden>
           <div class="player-qr-meta">
             <h3 class="player-qr-title">選手查閱 QR</h3>
-            <p class="player-qr-hint">掃碼查看賽程、即時比分與回放。設有 <code>arena-config.local.js</code> 時使用 Vercel 固定連結；否則需同一 Wi‑Fi。</p>
+            <p class="player-qr-hint">掃碼查賽程、比分與回放</p>
             <p id="player-qr-link" class="player-qr-link"></p>
-            <button id="btn-copy-player-link" class="btn btn-sm btn-ghost" type="button">複製連結</button>
-            <a id="overlay-link" href="overlay.html?session=junior" class="btn btn-sm btn-ghost" target="_blank" rel="noopener">OBS 投影</a>
-            <a href="queue.html" class="btn btn-sm btn-ghost" target="_blank" rel="noopener">叫號看板</a>
-            <a href="setup.html" class="btn btn-sm btn-ghost" target="_blank" rel="noopener">HTTPS 設定</a>
-            <span class="player-qr-hint overlay-hint">透明底：<code>overlay.html?transparent=1&amp;compact=1</code></span>
+            <div class="player-qr-actions">
+              <button id="btn-copy-player-link" class="btn btn-sm btn-ghost" type="button">複製連結</button>
+              <a id="overlay-link" href="overlay.html?session=junior" class="btn btn-sm btn-ghost" target="_blank" rel="noopener">OBS 投影</a>
+              <details class="player-qr-more">
+                <summary class="btn btn-sm btn-ghost">現場工具 ▾</summary>
+                <div class="player-qr-more-panel">
+                  <a href="queue.html" class="btn btn-sm btn-ghost" target="_blank" rel="noopener">叫號看板</a>
+                  <a href="setup.html" class="btn btn-sm btn-ghost" target="_blank" rel="noopener">HTTPS 設定</a>
+                </div>
+              </details>
+            </div>
           </div>
         </div>
       </aside>
@@ -356,19 +371,6 @@
             <span class="rec-dot"></span> LIVE
           </div>
         </div>
-        <div id="bey-scan-bar" class="bey-scan-bar" hidden>
-          <div class="bey-scan-bar-top">
-            <label class="toggle bey-scan-toggle">
-              <input type="checkbox" id="bey-scan-toggle"> 陀螺掃描
-            </label>
-            <span id="bey-detect-mode" class="bey-detect-mode" data-mode="motion">動態掃描</span>
-          </div>
-          <p class="bey-scan-status" id="bey-scan-status">動態追蹤或 AI 模型（放置於 models/beyblade/）</p>
-          <div class="bey-scan-actions">
-            <button id="btn-capture-frames" class="btn btn-sm btn-ghost" type="button">📷 收集訓練 frame</button>
-            <button id="btn-reload-model" class="btn btn-sm btn-ghost" type="button">重新載入 AI 模型</button>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -395,7 +397,7 @@
           <button id="btn-replay-pause-upload" class="btn btn-sm btn-ghost" type="button" aria-pressed="false">⏸ 暫停錄製上傳</button>
           <button id="btn-clear-replays" class="btn btn-sm btn-ghost" type="button">清除全部</button>
         </div>
-        <p class="replay-hint">同一 Match 的多局會歸在同一組；有鏡頭時每局另存影片。重播得分會全螢幕播放，並依實際時間軸同步得分事件。</p>
+        <p class="replay-hint">同一 Match 的多局會歸在同一組；有鏡頭時每局另存影片（含現場收音）。全螢幕計分時可按上方「重播」立即重播本局。</p>
         <div class="replay-layout">
           <div class="replay-main">
             <ul id="replay-list" class="replay-list" aria-live="polite"></ul>
@@ -530,7 +532,6 @@
     <span id="toast-text"></span>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
   <script src="arena-config.local.js" onerror="void 0"></script>
   <script src="arena-shared.js"></script>
   <script src="arena-match-lock.js"></script>
@@ -538,8 +539,6 @@
   <script src="arena-pin.js"></script>
   <script src="supabase-sync.js"></script>
   <script src="tournament.js"></script>
-  <script src="bey-detect.js"></script>
-  <script src="bey-scan.js"></script>
   <script src="replay.js"></script>
   <script src="arena-admin.js"></script>
   <script src="app.js"></script>

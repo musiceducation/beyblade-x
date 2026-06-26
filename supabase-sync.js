@@ -136,8 +136,9 @@ function updateCloudSyncIndicator(status, detail) {
   const el = $('#cloud-sync-status');
   if (!el) return;
   const c = getArenaConfig();
-  if (!c?.eventSlug) {
+  if (!c?.eventSlug || status === 'unconfigured') {
     el.hidden = true;
+    if (typeof updateArenaSyncBanner === 'function') updateArenaSyncBanner();
     return;
   }
   el.hidden = false;

@@ -315,7 +315,11 @@
         setStatus('正在開啟鏡頭…', 'wait');
         localStream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: false,
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
         });
         preview.srcObject = localStream;
 
