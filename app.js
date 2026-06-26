@@ -683,14 +683,14 @@ let launchTimers = [];
 let launchPlaying = false;
 
 const goShootAudio = $('#go-shoot-audio');
-// Measured from waveform (6.528s clip): Three, Two, One, Go Shoot!
+// Timings from 321goshoot.m4a (~7.38s, silence-detected)
 const GO_SHOOT_SYNC = [
-  { at: 0.12, label: 'Three' },
-  { at: 1.32, label: 'Two' },
-  { at: 2.54, label: 'One' },
-  { at: 4.18, label: 'Go Shoot!', fx: true },
+  { at: 0.34, label: 'Three' },
+  { at: 1.42, label: 'Two' },
+  { at: 2.32, label: 'One' },
+  { at: 4.0, label: 'Go Shoot!', fx: true },
 ];
-const GO_SHOOT_DURATION = 6.528;
+const GO_SHOOT_DURATION = 7.384;
 const LAUNCH_ZOOM_MS = 200;
 const PARTICLE_CAP = 160;
 const COMPETITION_MODE_KEY = 'bex-competition-mode';
