@@ -9,6 +9,99 @@ const MAX_REPLAYS = 60;
 const REPLAY_FINISH_FALLBACK_GAP_MS = 2200;
 const REPLAY_FINISH_MIN_GAP_MS = 2400;
 const REPLAY_ANNOUNCE_MS = 1800;
+const REPLAY_SPEED_KEY = 'bex-replay-speed';
+const REPLAY_ZOOM_KEY = 'bex-replay-zoom';
+const REPLAY_SPEED_OPTIONS = [0.25, 0.5, 0.75, 1];
+const REPLAY_ZOOM_OPTIONS = [1, 1.5, 2];
+const DEFAULT_REPLAY_SPEED = 0.5;
+
+function getReplayPlaybackRate() {
+  const v = parseFloat(localStorage.getItem(REPLAY_SPEED_KEY) || String(DEFAULT_REPLAY_SPEED));
+  return REPLAY_SPEED_OPTIONS.includes(v) ? v : DEFAULT_REPLAY_SPEED;
+}
+
+function setReplayPlaybackRate(rate) {
+  const n = parseFloat(rate);
+  if (!REPLAY_SPEED_OPTIONS.includes(n)) return;
+  localStorage.setItem(REPLAY_SPEED_KEY, String(n));
+  syncReplaySpeedSelects(n);
+  applyReplayPlaybackRate($('#replay-video'));
+  applyReplayPlaybackRate($('#replay-theater-video'));
+}
+
+function syncReplaySpeedSelects(rate) {
+  ['#replay-speed-select', '#replay-theater-speed', '#replay-sidebar-speed'].forEach((sel) => {
+    const el = $(sel);
+    if (el) el.value = String(rate);
+  });
+}
+
+function formatVideoClock(sec) {
+  if (!Number.isFinite(sec) || sec < 0) return '0:00';
+  const total = Math.floor(sec);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function replayScaleMs(ms) {
+  const rate = getReplayPlaybackRate();
+  return rate > 0 ? ms / rate : ms;
+}
+
+function applyReplayPlaybackRate(video) {
+  if (!video) return;
+  const rate = getReplayPlaybackRate();
+  video.defaultPlaybackRate = rate;
+  video.playbackRate = rate;
+}
+
+function getReplayZoom() {
+  const v = parseFloat(localStorage.getItem(REPLAY_ZOOM_KEY) || '1');
+  return REPLAY_ZOOM_OPTIONS.includes(v) ? v : 1;
+}
+
+function replayZoomLabel(zoom) {
+  if (zoom <= 1) return '🔍 1×';
+  if (zoom === 1.5) return '🔍 1.5×';
+  return '🔍 2×';
+}
+
+function applyReplayZoom(video, viewport) {
+  const zoom = getReplayZoom();
+  if (viewport) viewport.dataset.zoom = String(zoom);
+  if (video) {
+    video.style.transform = zoom === 1 ? '' : `scale(${zoom})`;
+    video.style.transformOrigin = 'center center';
+  }
+}
+
+function setReplayZoom(zoom) {
+  const n = parseFloat(zoom);
+  if (!REPLAY_ZOOM_OPTIONS.includes(n)) return;
+  localStorage.setItem(REPLAY_ZOOM_KEY, String(n));
+  syncReplayZoomButtons(n);
+  applyReplayZoom($('#replay-video'), $('#replay-sidebar-viewport'));
+  applyReplayZoom($('#replay-theater-video'), $('#replay-theater-viewport'));
+}
+
+function cycleReplayZoom() {
+  const cur = getReplayZoom();
+  const idx = REPLAY_ZOOM_OPTIONS.indexOf(cur);
+  setReplayZoom(REPLAY_ZOOM_OPTIONS[(idx + 1) % REPLAY_ZOOM_OPTIONS.length]);
+}
+
+function syncReplayZoomButtons(zoom) {
+  const label = replayZoomLabel(zoom);
+  ['#btn-replay-sidebar-zoom', '#btn-replay-theater-zoom'].forEach((sel) => {
+    const btn = $(sel);
+    if (btn) {
+      btn.textContent = label;
+      btn.title = zoom === 1 ? '放大影片' : `目前 ${zoom}× · 點擊切換`;
+      btn.classList.toggle('is-active', zoom > 1);
+    }
+  });
+}
 
 const replayState = {
   replays: [],
@@ -28,6 +121,7 @@ const replayState = {
   recordingPaused: sessionStorage.getItem('bex-replay-paused') === '1',
   debug: false,
   micStream: null,
+  sidebarScrubbing: false,
 };
 
 function isReplayDebug() {
@@ -49,6 +143,9 @@ function updateReplaySyncStatus() {
     ? replayState.replays.filter((r) => r.cloudSynced === false).length
     : 0;
   const uploading = replayState.serverUploadPending;
+  const retryBtn = $('#btn-replay-retry-upload');
+  const hasPending = pendingLan > 0 || pendingCloud > 0;
+  if (retryBtn) retryBtn.hidden = !hasPending && uploading === 0;
   if (uploading > 0) {
     el.textContent = `上傳中 ${uploading}`;
     el.dataset.status = 'syncing';
@@ -398,7 +495,7 @@ function startReplayRecording(sessionId) {
     try {
       const rec = new MediaRecorder(stream, {
         mimeType,
-        videoBitsPerSecond: 2500000,
+        videoBitsPerSecond: typeof getReplayBitrate === 'function' ? getReplayBitrate() : 2500000,
         audioBitsPerSecond: recordingHasAudio(stream) ? 128000 : undefined,
       });
       rec.ondataavailable = (e) => {
@@ -1138,19 +1235,315 @@ function playReplayFinishFeedback(event, replay) {
 function hideReplayTheater() {
   const theater = $('#replay-theater');
   const tv = $('#replay-theater-video');
+  finishTheaterRound();
+  hideTheaterControls();
   if (typeof hideFinishAnnounce === 'function') hideFinishAnnounce();
   if ('speechSynthesis' in window) window.speechSynthesis.cancel();
   theater?.classList.remove('shake', 'shake-heavy', 'shake-go-shoot');
   if (tv) {
+    detachTheaterVideoSync(tv);
     detachTheaterVideoGuard(tv);
     tv.pause();
     tv.removeAttribute('src');
     tv.classList.add('no-video');
+    tv.defaultPlaybackRate = 1;
+    tv.playbackRate = 1;
   }
   theater?.classList.remove('replay-theater--no-video');
   theater?.setAttribute('hidden', '');
   theater?.setAttribute('aria-hidden', 'true');
   document.body.classList.remove('replay-theater-active');
+}
+
+function showTheaterControls(tv) {
+  const controls = $('#replay-theater-controls');
+  if (!controls || !tv) return;
+  const refreshDuration = () => {
+    const duration = Number.isFinite(tv.duration) ? tv.duration : 0;
+    const scrubber = $('#replay-theater-scrubber');
+    if (scrubber && duration > 0) scrubber.max = String(duration);
+    updateTheaterScrubber(tv.currentTime || 0, duration);
+  };
+  refreshDuration();
+  if (!tv.dataset.replayDurationBound) {
+    tv.dataset.replayDurationBound = '1';
+    tv.addEventListener('loadedmetadata', refreshDuration);
+    tv.addEventListener('durationchange', refreshDuration);
+  }
+  syncReplaySpeedSelects(getReplayPlaybackRate());
+  syncReplayZoomButtons(getReplayZoom());
+  applyReplayZoom(tv, $('#replay-theater-viewport'));
+  updateTheaterPlayButton(tv);
+  controls.removeAttribute('hidden');
+}
+
+function showSidebarVideoControls(show) {
+  const controls = $('#replay-sidebar-controls');
+  if (!controls) return;
+  if (show) controls.removeAttribute('hidden');
+  else controls.setAttribute('hidden', '');
+}
+
+function updateSidebarScrubber(currentSec, durationSec) {
+  const scrubber = $('#replay-sidebar-scrubber');
+  if (scrubber && !replayState.sidebarScrubbing) {
+    scrubber.value = String(Math.max(0, currentSec));
+    if (Number.isFinite(durationSec) && durationSec > 0) {
+      scrubber.max = String(durationSec);
+    }
+  }
+  const cur = $('#replay-sidebar-time-current');
+  const tot = $('#replay-sidebar-time-total');
+  if (cur) cur.textContent = formatVideoClock(currentSec);
+  if (tot) tot.textContent = formatVideoClock(durationSec);
+}
+
+function updateSidebarPlayButton(video) {
+  const btn = $('#btn-replay-sidebar-play');
+  if (!btn) return;
+  const paused = video ? video.paused : true;
+  btn.textContent = paused ? '▶' : '⏸';
+  btn.setAttribute('aria-label', paused ? '播放' : '暫停');
+}
+
+function refreshSidebarVideoUi(video) {
+  if (!video?.src) return;
+  const duration = Number.isFinite(video.duration) ? video.duration : 0;
+  updateSidebarScrubber(video.currentTime || 0, duration);
+  updateSidebarPlayButton(video);
+  applyReplayPlaybackRate(video);
+  applyReplayZoom(video, $('#replay-sidebar-viewport'));
+}
+
+function toggleSidebarPlayPause() {
+  const video = $('#replay-video');
+  if (!video?.src) return;
+  if (video.paused) video.play().catch(() => {});
+  else video.pause();
+}
+
+function initSidebarVideoControls() {
+  const video = $('#replay-video');
+  if (!video || video.dataset.replaySidebarBound === '1') return;
+  video.dataset.replaySidebarBound = '1';
+
+  const onMeta = () => refreshSidebarVideoUi(video);
+  video.addEventListener('loadedmetadata', onMeta);
+  video.addEventListener('durationchange', onMeta);
+  video.addEventListener('timeupdate', () => {
+    if (replayState.sidebarScrubbing) return;
+    updateSidebarScrubber(video.currentTime, video.duration);
+  });
+  video.addEventListener('play', () => updateSidebarPlayButton(video));
+  video.addEventListener('pause', () => updateSidebarPlayButton(video));
+  video.addEventListener('ended', () => updateSidebarPlayButton(video));
+
+  $('#btn-replay-sidebar-play')?.addEventListener('click', () => toggleSidebarPlayPause());
+  $('#replay-sidebar-speed')?.addEventListener('change', (e) => {
+    setReplayPlaybackRate(parseFloat(e.target.value, 10));
+  });
+  $('#btn-replay-sidebar-zoom')?.addEventListener('click', () => cycleReplayZoom());
+
+  const scrubber = $('#replay-sidebar-scrubber');
+  scrubber?.addEventListener('pointerdown', () => {
+    replayState.sidebarScrubbing = true;
+    video.pause();
+  });
+  scrubber?.addEventListener('input', (e) => {
+    const t = parseFloat(e.target.value, 10);
+    if (!Number.isFinite(t)) return;
+    try { video.currentTime = t; } catch (_) { /* seek unsupported */ }
+    updateSidebarScrubber(t, video.duration);
+  });
+  const endScrub = () => {
+    replayState.sidebarScrubbing = false;
+    updateSidebarPlayButton(video);
+  };
+  scrubber?.addEventListener('pointerup', endScrub);
+  scrubber?.addEventListener('change', endScrub);
+}
+
+function hideTheaterControls() {
+  $('#replay-theater-controls')?.setAttribute('hidden', '');
+}
+
+function updateTheaterScrubber(currentSec, durationSec) {
+  const scrubber = $('#replay-theater-scrubber');
+  if (scrubber && !replayState.playback?.theater?.scrubbing) {
+    scrubber.value = String(Math.max(0, currentSec));
+    if (Number.isFinite(durationSec) && durationSec > 0) {
+      scrubber.max = String(durationSec);
+    }
+  }
+  const cur = $('#replay-theater-time-current');
+  const tot = $('#replay-theater-time-total');
+  if (cur) cur.textContent = formatVideoClock(currentSec);
+  if (tot) tot.textContent = formatVideoClock(durationSec);
+}
+
+function updateTheaterPlayButton(tv) {
+  const btn = $('#btn-replay-theater-play');
+  if (!btn) return;
+  const paused = tv ? tv.paused : true;
+  btn.textContent = paused ? '▶' : '⏸';
+  btn.setAttribute('aria-label', paused ? '播放' : '暫停');
+}
+
+function scoresAtTheaterTime(schedule, timeSec, startScores) {
+  let scores = [...startScores];
+  schedule.forEach((entry) => {
+    if (entry.videoSeek != null && entry.videoSeek <= timeSec + 0.05) {
+      scores = [...entry.event.scores];
+    }
+  });
+  return scores;
+}
+
+function syncTheaterFiredFromTime(theater, timeSec) {
+  theater.schedule.forEach((entry, i) => {
+    if (entry.videoSeek == null) return;
+    if (entry.videoSeek <= timeSec + 0.08) theater.fired.add(i);
+    else theater.fired.delete(i);
+  });
+}
+
+function seekTheaterTo(timeSec) {
+  const theater = replayState.playback?.theater;
+  if (!theater?.tv) return;
+  const tv = theater.tv;
+  const duration = Number.isFinite(tv.duration) ? tv.duration : 0;
+  const safe = Math.min(Math.max(0, timeSec), Math.max(0, duration - 0.05));
+  try {
+    tv.currentTime = safe;
+  } catch (_) { /* seek unsupported */ }
+  updateTheaterScrubber(safe, duration);
+  syncTheaterFiredFromTime(theater, safe);
+  updateReplayHud(theater.replay, scoresAtTheaterTime(theater.schedule, safe, theater.startScores), theater.roundLabel);
+}
+
+function onTheaterTimeUpdate() {
+  const theater = replayState.playback?.theater;
+  if (!theater?.tv || theater.scrubbing) return;
+  const tv = theater.tv;
+  const t = tv.currentTime;
+  updateTheaterScrubber(t, tv.duration);
+  theater.schedule.forEach((entry, i) => {
+    if (theater.fired.has(i)) return;
+    if (entry.videoSeek == null || t < entry.videoSeek - 0.08) return;
+    theater.fired.add(i);
+    updateReplayHud(theater.replay, entry.event.scores, theater.roundLabel);
+    playReplayFinishFeedback(entry.event, theater.replay);
+  });
+}
+
+function attachTheaterVideoSync(tv) {
+  detachTheaterVideoSync(tv);
+  const onTime = () => onTheaterTimeUpdate();
+  const onPlay = () => updateTheaterPlayButton(tv);
+  const onPause = () => updateTheaterPlayButton(tv);
+  tv._theaterOnTime = onTime;
+  tv._theaterOnPlay = onPlay;
+  tv._theaterOnPause = onPause;
+  tv.addEventListener('timeupdate', onTime);
+  tv.addEventListener('play', onPlay);
+  tv.addEventListener('pause', onPause);
+}
+
+function detachTheaterVideoSync(tv) {
+  if (!tv) return;
+  if (tv._theaterOnTime) tv.removeEventListener('timeupdate', tv._theaterOnTime);
+  if (tv._theaterOnPlay) tv.removeEventListener('play', tv._theaterOnPlay);
+  if (tv._theaterOnPause) tv.removeEventListener('pause', tv._theaterOnPause);
+  delete tv._theaterOnTime;
+  delete tv._theaterOnPlay;
+  delete tv._theaterOnPause;
+}
+
+function finishTheaterRound() {
+  const resolve = replayState.playback?.theaterResolve;
+  if (resolve) {
+    replayState.playback.theaterResolve = null;
+    resolve();
+  }
+}
+
+function toggleTheaterPlayPause() {
+  const theater = replayState.playback?.theater;
+  if (!theater?.tv) return;
+  if (theater.tv.paused) {
+    theater.userPaused = false;
+    theater.tv.play().catch(() => {});
+  } else {
+    theater.userPaused = true;
+    theater.tv.pause();
+  }
+}
+
+function waitForTheaterVideoEnd(tv) {
+  return new Promise((resolve) => {
+    if (!replayState.playback || replayState.playback.cancelled) {
+      resolve();
+      return;
+    }
+    replayState.playback.theaterResolve = resolve;
+    const onEnd = () => finishTheaterRound();
+    tv.addEventListener('ended', onEnd, { once: true });
+    const dur = Number.isFinite(tv.duration) ? tv.duration : 0;
+    const rate = getReplayPlaybackRate();
+    const maxMs = dur > 0 ? (dur / rate) * 1000 + 3000 : 120000;
+    const fallbackId = setTimeout(onEnd, maxMs);
+    replayState.playback.timers.push(fallbackId);
+  });
+}
+
+async function playReplayRoundWithVideo(replay, videoUrl, options, startScores, roundLabel, tv, videoDuration) {
+  const schedule = buildFinishSchedule(replay, videoDuration);
+  replayDebug('round-video', {
+    id: replay.id,
+    battleNum: replay.battleNum,
+    videoDuration,
+    finishes: schedule.length,
+  });
+
+  replayState.playback.theater = {
+    replay,
+    roundLabel,
+    schedule,
+    tv,
+    startScores,
+    fired: new Set(),
+    userPaused: false,
+    scrubbing: false,
+  };
+
+  showTheaterControls(tv);
+  attachTheaterVideoSync(tv);
+  await waitForTheaterVideoEnd(tv);
+  detachTheaterVideoSync(tv);
+  replayState.playback.theater = null;
+
+  if (!replayState.playback?.cancelled) {
+    await waitMs(800);
+  }
+}
+
+async function playReplayRoundWithoutVideo(replay, roundLabel, schedule) {
+  let lastDelay = 350;
+  schedule.forEach((entry) => {
+    lastDelay = Math.max(lastDelay, entry.delay);
+    scheduleReplayStep(() => {
+      if (!replayState.playback || replayState.playback.cancelled) return;
+      updateReplayHud(replay, entry.event.scores, roundLabel);
+      playReplayFinishFeedback(entry.event, replay);
+    }, entry.delay);
+  });
+
+  const tailMs = 800;
+  const endDelay = Math.max(
+    lastDelay + tailMs,
+    schedule.length ? schedule[schedule.length - 1].delay + tailMs : 600,
+  );
+  await waitMs(endDelay);
 }
 
 function theaterVideoSrcMatches(tv, videoUrl) {
@@ -1188,6 +1581,8 @@ async function prepareTheaterVideo(tv, videoUrl) {
   try {
     tv.currentTime = 0;
   } catch (_) { /* seek unsupported */ }
+  applyReplayPlaybackRate(tv);
+  applyReplayZoom(tv, $('#replay-theater-viewport'));
   try {
     await tv.play();
     tv.muted = false;
@@ -1217,6 +1612,8 @@ function attachTheaterVideoGuard(tv) {
   tv.addEventListener('pause', () => {
     if (!document.body.classList.contains('replay-playing') || replayState.playback?.cancelled) return;
     if (tv.ended) return;
+    const theater = replayState.playback?.theater;
+    if (theater?.userPaused || theater?.scrubbing) return;
     tv.play().catch(() => {});
   });
 }
@@ -1268,6 +1665,7 @@ function stopReplayPlayback(options = {}) {
   const { keepPanel = false } = options;
   if (replayState.playback) {
     replayState.playback.cancelled = true;
+    finishTheaterRound();
     replayState.playback.timers.forEach(clearTimeout);
     replayState.playback = null;
   }
@@ -1371,7 +1769,11 @@ async function openReplayPlayer(id, options = {}) {
   const videoUrl = await loadReplayVideoUrl(replay);
   if (video && videoUrl) {
     video.src = videoUrl;
+    applyReplayPlaybackRate(video);
     video.hidden = false;
+    showSidebarVideoControls(true);
+    syncReplaySpeedSelects(getReplayPlaybackRate());
+    refreshSidebarVideoUi(video);
     downloadBtn.hidden = false;
     downloadBtn.onclick = () => { downloadReplayVideo(replay, videoUrl).catch(console.error); };
     if (shareBtn) {
@@ -1386,6 +1788,7 @@ async function openReplayPlayer(id, options = {}) {
     }
   } else if (video) {
     video.hidden = true;
+    showSidebarVideoControls(false);
     downloadBtn.hidden = true;
     if (shareBtn) shareBtn.hidden = true;
     if (matchDlBtn) matchDlBtn.hidden = true;
@@ -1415,7 +1818,7 @@ function scheduleReplayStep(fn, delay) {
   const id = setTimeout(() => {
     if (!replayState.playback || replayState.playback.cancelled) return;
     fn();
-  }, delay);
+  }, replayScaleMs(delay));
   replayState.playback.timers.push(id);
 }
 
@@ -1469,29 +1872,11 @@ async function playReplayRound(replay, videoUrl, options = {}) {
     })),
   });
 
-  let lastDelay = 350;
-  schedule.forEach((entry) => {
-    lastDelay = Math.max(lastDelay, entry.delay);
-    scheduleReplayStep(() => {
-      if (!replayState.playback || replayState.playback.cancelled) return;
-
-      if (videoUrl && tv && entry.videoSeek != null) {
-        syncTheaterVideoTime(tv, entry.videoSeek).catch(() => {});
-      }
-
-      updateReplayHud(replay, entry.event.scores, roundLabel);
-      playReplayFinishFeedback(entry.event, replay);
-    }, entry.delay);
-  });
-
-  const tailMs = videoUrl ? 1500 : 800;
-  const endDelay = Math.max(
-    lastDelay + tailMs,
-    videoDuration > 0 ? videoDuration * 1000 + 300 : 0,
-    schedule.length ? schedule[schedule.length - 1].delay + tailMs : 600,
-  );
-
-  await waitMs(endDelay);
+  if (videoUrl && tv) {
+    await playReplayRoundWithVideo(replay, videoUrl, options, startScores, roundLabel, tv, videoDuration);
+  } else {
+    await playReplayRoundWithoutVideo(replay, roundLabel, schedule);
+  }
 }
 
 async function playReplayScores() {
@@ -1556,7 +1941,6 @@ async function clearAllReplays() {
     ? '清除全部戰鬥回放？本機、伺服器及雲端影片也會一併刪除。'
     : '本機無回放。是否清除伺服器及雲端上的舊回放？';
   if (!confirm(msg)) return;
-  if (typeof confirmArenaPin === 'function' && !confirmArenaPin('清除全部回放')) return;
 
   stopReplayPlayback();
   discardReplaySession();
@@ -1656,14 +2040,58 @@ function initReplay() {
   $('#btn-replay-stop')?.addEventListener('click', () => stopReplayPlayback({ keepPanel: true }));
   $('#btn-replay-close')?.addEventListener('click', stopReplayPlayback);
   $('#btn-replay-theater-stop')?.addEventListener('click', () => stopReplayPlayback({ keepPanel: true }));
+  $('#btn-replay-theater-play')?.addEventListener('click', () => toggleTheaterPlayPause());
+  $('#replay-theater-speed')?.addEventListener('change', (e) => {
+    setReplayPlaybackRate(parseFloat(e.target.value, 10));
+  });
+  $('#btn-replay-theater-zoom')?.addEventListener('click', () => cycleReplayZoom());
+
+  const scrubber = $('#replay-theater-scrubber');
+  scrubber?.addEventListener('pointerdown', () => {
+    const theater = replayState.playback?.theater;
+    if (!theater) return;
+    theater.scrubbing = true;
+    theater.tv?.pause();
+  });
+  scrubber?.addEventListener('input', (e) => {
+    seekTheaterTo(parseFloat(e.target.value, 10));
+  });
+  const endScrub = () => {
+    const theater = replayState.playback?.theater;
+    if (!theater) return;
+    theater.scrubbing = false;
+    if (!theater.userPaused && !theater.tv?.ended) {
+      theater.tv?.play().catch(() => {});
+    }
+  };
+  scrubber?.addEventListener('pointerup', endScrub);
+  scrubber?.addEventListener('change', endScrub);
+
   $('#btn-argue-replay')?.addEventListener('click', () => { playArgueReplay().catch(console.error); });
   $('#btn-live-replay')?.addEventListener('click', () => { playArgueReplay().catch(console.error); });
   $('#btn-clear-replays')?.addEventListener('click', clearAllReplays);
   $('#btn-replay-pause-upload')?.addEventListener('click', () => {
     setReplayRecordingPaused(!replayState.recordingPaused);
   });
+  $('#btn-replay-retry-upload')?.addEventListener('click', () => {
+    retryPendingReplayUploads().then(() => {
+      if (typeof showToast === 'function') showToast('已重試待上傳回放');
+      updateReplaySyncStatus();
+    }).catch(console.error);
+  });
   updateReplayPauseUi();
   updateArgueReplayButton();
+  initSidebarVideoControls();
+
+  syncReplaySpeedSelects(getReplayPlaybackRate());
+  syncReplayZoomButtons(getReplayZoom());
+  $('#replay-speed-select')?.addEventListener('change', (e) => {
+    setReplayPlaybackRate(parseFloat(e.target.value, 10));
+    if (typeof showToast === 'function') {
+      const rate = getReplayPlaybackRate();
+      showToast(rate === 1 ? '回放速度：正常' : `回放速度：${rate}× 慢動作`);
+    }
+  });
 
   const replayParam = new URLSearchParams(location.search).get('replay');
   if (replayParam) {

@@ -127,6 +127,16 @@ body {
   color: var(--red);
 }
 
+.player-cache-banner {
+  margin: 0.35rem 0 0;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.78rem;
+  border-radius: 8px;
+  background: rgba(255, 159, 10, 0.12);
+  color: #ff9f0a;
+  border: 1px solid rgba(255, 159, 10, 0.25);
+}
+
 .player-sync-dot {
   width: 8px;
   height: 8px;
@@ -136,6 +146,7 @@ body {
 }
 
 .player-sync-dot[data-status="synced"] { background: var(--green); box-shadow: 0 0 8px rgba(52, 199, 89, 0.45); }
+.player-sync-dot[data-status="cached"] { background: var(--gold); }
 .player-sync-dot[data-status="connecting"] { background: var(--gold); animation: pulse 1s infinite; }
 .player-sync-dot[data-status="error"],
 .player-sync-dot[data-status="unconfigured"] { background: var(--red); }
@@ -810,11 +821,107 @@ body {
 .replay-finish-chip--p1 { border-left: 2px solid var(--red); }
 .replay-finish-chip--p2 { border-left: 2px solid var(--blue); }
 
+.player-replay-video-wrap {
+  background: #000;
+}
+
+.replay-player-viewport {
+  overflow: hidden;
+  line-height: 0;
+  background: #000;
+}
+
+.replay-player-bar {
+  padding: 0.4rem 0.5rem 0.5rem;
+  background: rgba(0, 0, 0, 0.92);
+  border-top: 1px solid var(--border);
+}
+
+.replay-player-speed-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.35rem;
+}
+
+.btn-replay-player-zoom {
+  padding: 0.3rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-family: var(--font);
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-replay-player-zoom.is-active {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.replay-player-speed {
+  min-width: 5.5rem;
+  padding: 0.3rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-family: var(--font);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.replay-player-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.replay-player-progress--wide {
+  padding: 0.45rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.btn-replay-player-play {
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.replay-player-time {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.75);
+  min-width: 2.2rem;
+}
+
+.replay-player-scrubber {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 0.35rem;
+  accent-color: var(--gold);
+  cursor: pointer;
+}
+
 .player-replay-video {
   width: 100%;
   display: block;
   max-height: min(42vh, 320px);
   background: #000;
+  transition: transform 0.15s ease;
 }
 
 .player-replay-footer {
@@ -998,6 +1105,17 @@ body.portal-replay-theater-active {
   display: flex;
 }
 
+.portal-replay-theater-viewport {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+}
+
 .portal-replay-theater-video {
   position: relative;
   z-index: 1;
@@ -1005,10 +1123,26 @@ body.portal-replay-theater-active {
   height: 100%;
   object-fit: contain;
   background: #000;
+  transition: transform 0.15s ease;
 }
 
 .portal-replay-theater--no-video .portal-replay-theater-video {
   display: none;
+}
+
+.portal-replay-theater-chrome {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10006;
+  pointer-events: none;
+  padding: 0 0.75rem max(0.65rem, env(safe-area-inset-bottom));
+}
+
+.portal-replay-theater-chrome .replay-player-speed-row,
+.portal-replay-theater-chrome .replay-player-progress {
+  pointer-events: auto;
 }
 
 .portal-replay-vignette {
@@ -1025,9 +1159,9 @@ body.portal-replay-theater-active {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 0;
+  bottom: 4.75rem;
   z-index: 10004;
-  padding: 1rem 1rem max(1.25rem, env(safe-area-inset-bottom));
+  padding: 1rem 1rem 0.35rem;
   text-align: center;
   pointer-events: none;
 }

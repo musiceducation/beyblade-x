@@ -89,6 +89,7 @@
         <input id="station-name-input" class="station-name-input" type="text" placeholder="台 1" maxlength="40" aria-label="計分台名稱">
       </label>
       <button id="btn-fullscreen" class="btn btn-ghost" title="全螢幕">⛶</button>
+      <button id="btn-shortcuts-help" class="btn btn-ghost" type="button" title="快捷鍵（?）">?</button>
       <button id="btn-event-checklist" class="btn btn-ghost" type="button" title="開賽檢查">✅</button>
       <button id="btn-admin-settings" class="btn btn-ghost" type="button" title="管理設定">⚙</button>
       <button id="btn-reset-match" class="btn btn-ghost">重置對戰</button>
@@ -171,7 +172,7 @@
         <audio id="go-shoot-audio" preload="auto" src="beyblade-burst-sparking--shu-321-go-shoot.mp3"></audio>
         <button id="btn-next-battle" class="btn btn-ghost btn-sm">下一局</button>
         <button id="btn-argue-replay" class="btn btn-ghost btn-sm" type="button" title="爭議時立即重播本局（含現場收音）">重播</button>
-        <button id="btn-undo-finish" class="btn btn-ghost btn-sm" type="button" disabled title="撤銷上一個得分">↩ 撤銷</button>
+        <button id="btn-undo-finish" class="btn btn-ghost btn-sm" type="button" disabled title="撤銷上一個得分（Z）">↩ 撤銷</button>
       </div>
 
       <article class="player-card player-blue" data-player="2">
@@ -395,6 +396,7 @@
             <span id="replay-sync-status" class="replay-sync-status" data-status="idle" hidden></span>
           </h2>
           <button id="btn-replay-pause-upload" class="btn btn-sm btn-ghost" type="button" aria-pressed="false">⏸ 暫停錄製上傳</button>
+          <button id="btn-replay-retry-upload" class="btn btn-sm btn-ghost" type="button" hidden>↻ 重試上傳</button>
           <button id="btn-clear-replays" class="btn btn-sm btn-ghost" type="button">清除全部</button>
         </div>
         <p class="replay-hint">同一 Match 的多局會歸在同一組；有鏡頭時每局另存影片（含現場收音）。全螢幕計分時可按上方「重播」立即重播本局。</p>
@@ -404,7 +406,28 @@
           </div>
           <aside id="replay-player" class="replay-player replay-sidebar" hidden>
             <div id="replay-round-tabs" class="replay-round-tabs" hidden></div>
-            <video id="replay-video" class="replay-video" controls playsinline></video>
+            <div class="replay-video-wrap">
+              <div id="replay-sidebar-viewport" class="replay-player-viewport">
+                <video id="replay-video" class="replay-video" playsinline></video>
+              </div>
+              <div id="replay-sidebar-controls" class="replay-player-bar" hidden>
+                <div class="replay-player-speed-row">
+                  <button id="btn-replay-sidebar-zoom" type="button" class="btn-replay-player-zoom" title="放大影片">🔍 1×</button>
+                  <select id="replay-sidebar-speed" class="replay-player-speed" aria-label="回放速度" title="慢動作重播">
+                    <option value="1">1× 正常</option>
+                    <option value="0.75">0.75×</option>
+                    <option value="0.5" selected>0.5× 慢動作</option>
+                    <option value="0.25">0.25× 超慢</option>
+                  </select>
+                </div>
+                <div class="replay-player-progress">
+                  <button id="btn-replay-sidebar-play" type="button" class="btn-replay-player-play" aria-label="播放／暫停">▶</button>
+                  <span id="replay-sidebar-time-current" class="replay-player-time">0:00</span>
+                  <input type="range" id="replay-sidebar-scrubber" class="replay-player-scrubber" min="0" max="0" step="0.05" value="0" aria-label="播放進度">
+                  <span id="replay-sidebar-time-total" class="replay-player-time">0:00</span>
+                </div>
+              </div>
+            </div>
             <div class="replay-player-meta">
               <h3 id="replay-player-title"></h3>
               <p id="replay-player-progress"></p>
@@ -447,22 +470,43 @@
     <div class="replay-theater-backdrop" aria-hidden="true">
       <p class="replay-theater-backdrop-label">得分回放</p>
     </div>
-    <video id="replay-theater-video" class="replay-theater-video" playsinline></video>
+    <div class="replay-theater-viewport" id="replay-theater-viewport">
+      <video id="replay-theater-video" class="replay-theater-video" playsinline></video>
+    </div>
     <div class="replay-theater-vignette" aria-hidden="true"></div>
-    <div class="replay-theater-hud">
-      <p class="replay-hud-battle" id="replay-hud-battle">第 1 局</p>
-      <div class="replay-hud-scores">
-        <div class="replay-hud-player replay-hud-red">
-          <span id="replay-hud-p1">Blader 1</span>
-          <strong id="replay-hud-s1">0</strong>
+    <div class="replay-theater-footer">
+      <div class="replay-theater-hud">
+        <p class="replay-hud-battle" id="replay-hud-battle">第 1 局</p>
+        <div class="replay-hud-scores">
+          <div class="replay-hud-player replay-hud-red">
+            <span id="replay-hud-p1">Blader 1</span>
+            <strong id="replay-hud-s1">0</strong>
+          </div>
+          <span class="replay-hud-vs">VS</span>
+          <div class="replay-hud-player replay-hud-blue">
+            <span id="replay-hud-p2">Blader 2</span>
+            <strong id="replay-hud-s2">0</strong>
+          </div>
         </div>
-        <span class="replay-hud-vs">VS</span>
-        <div class="replay-hud-player replay-hud-blue">
-          <span id="replay-hud-p2">Blader 2</span>
-          <strong id="replay-hud-s2">0</strong>
-        </div>
+        <p class="replay-hud-label" id="replay-hud-label">回放中…</p>
       </div>
-      <p class="replay-hud-label" id="replay-hud-label">回放中…</p>
+    </div>
+    <div id="replay-theater-controls" class="replay-theater-chrome" hidden>
+      <div class="replay-player-speed-row">
+        <button id="btn-replay-theater-zoom" type="button" class="btn-replay-player-zoom" title="放大影片">🔍 1×</button>
+        <select id="replay-theater-speed" class="replay-player-speed" aria-label="回放速度" title="慢動作重播">
+          <option value="1">1× 正常</option>
+          <option value="0.75">0.75×</option>
+          <option value="0.5" selected>0.5× 慢動作</option>
+          <option value="0.25">0.25× 超慢</option>
+        </select>
+      </div>
+      <div class="replay-player-progress replay-player-progress--wide">
+        <button id="btn-replay-theater-play" type="button" class="btn-replay-player-play" aria-label="播放／暫停">⏸</button>
+        <span id="replay-theater-time-current" class="replay-player-time">0:00</span>
+        <input type="range" id="replay-theater-scrubber" class="replay-player-scrubber" min="0" max="0" step="0.05" value="0" aria-label="播放進度">
+        <span id="replay-theater-time-total" class="replay-player-time">0:00</span>
+      </div>
     </div>
     <button id="btn-replay-theater-stop" class="btn btn-ghost btn-replay-theater-stop" type="button">✕ 停止回放</button>
   </div>
@@ -499,9 +543,14 @@
         <input type="checkbox" id="competition-mode-toggle" checked>
         比賽模式（倒數時鎖定計分、暫停掃描、減少延遲）
       </label>
+      <label class="checklist-competition-toggle">
+        <input type="checkbox" id="low-fx-mode-toggle">
+        低特效模式（關閉粒子動畫，舊裝置建議開啟）
+      </label>
       <ul id="checklist-items" class="checklist-items"></ul>
       <div class="admin-modal-actions">
         <button id="btn-checklist-warm" class="btn btn-sm btn-primary" type="button">預熱倒數音效</button>
+        <button id="btn-checklist-retry-replays" class="btn btn-sm btn-ghost" type="button" hidden>重試待上傳回放</button>
         <button id="btn-checklist-refresh" class="btn btn-sm btn-ghost" type="button">重新檢查</button>
         <button id="btn-checklist-close" class="btn btn-sm btn-primary" type="button">關閉</button>
       </div>
@@ -513,18 +562,46 @@
     <div class="admin-modal-card">
       <h3 id="admin-settings-title">管理設定</h3>
       <fieldset class="admin-fieldset">
-        <legend>管理 PIN</legend>
-        <label>目前 PIN <input id="pin-current" type="password" inputmode="numeric" autocomplete="off"></label>
-        <label>新 PIN <input id="pin-new" type="password" inputmode="numeric" autocomplete="off"></label>
-        <label>確認 PIN <input id="pin-confirm" type="password" inputmode="numeric" autocomplete="off"></label>
-        <button id="btn-pin-save" class="btn btn-sm btn-primary" type="button">儲存 PIN</button>
-        <button id="btn-pin-cancel" class="btn btn-sm btn-ghost" type="button">取消</button>
-      </fieldset>
-      <fieldset class="admin-fieldset">
         <legend>勝利分數</legend>
         <label>分數制 <input id="match-target-input" type="number" min="1" max="10" value="4"></label>
         <button id="btn-match-target-save" class="btn btn-sm btn-primary" type="button">套用</button>
       </fieldset>
+      <fieldset class="admin-fieldset">
+        <legend>影片設定</legend>
+        <label>影片碼率
+          <select id="replay-bitrate-select" class="session-select">
+            <option value="1500000">1.5 Mbps（省流量）</option>
+            <option value="2500000" selected>2.5 Mbps（預設）</option>
+            <option value="4000000">4 Mbps（高畫質）</option>
+          </select>
+        </label>
+        <label>回放速度
+          <select id="replay-speed-select" class="session-select" title="慢動作重播，得分提示會與影片同步">
+            <option value="1">1× 正常</option>
+            <option value="0.75">0.75×</option>
+            <option value="0.5" selected>0.5× 慢動作</option>
+            <option value="0.25">0.25× 超慢</option>
+          </select>
+        </label>
+      </fieldset>
+      <fieldset class="admin-fieldset">
+        <legend>賽程備份</legend>
+        <button id="btn-backup-tournament-admin" class="btn btn-sm btn-primary" type="button">匯出 JSON</button>
+        <button id="btn-restore-tournament-admin" class="btn btn-sm btn-ghost" type="button">還原 JSON</button>
+        <input id="restore-tournament-admin-file" type="file" accept="application/json,.json" hidden>
+      </fieldset>
+    </div>
+  </div>
+
+  <div id="shortcuts-modal" class="admin-modal" hidden role="dialog" aria-labelledby="shortcuts-title">
+    <div class="admin-modal-backdrop"></div>
+    <div class="admin-modal-card admin-modal-card--wide">
+      <h3 id="shortcuts-title">快捷鍵</h3>
+      <p class="shortcuts-hint">在輸入框外可用 · 按 <kbd>?</kbd> 關閉</p>
+      <table id="shortcuts-list" class="shortcuts-table"></table>
+      <div class="admin-modal-actions">
+        <button id="btn-shortcuts-close" class="btn btn-sm btn-primary" type="button">關閉</button>
+      </div>
     </div>
   </div>
 
@@ -536,7 +613,6 @@
   <script src="arena-shared.js"></script>
   <script src="arena-match-lock.js"></script>
   <script src="arena-broadcast.js"></script>
-  <script src="arena-pin.js"></script>
   <script src="supabase-sync.js"></script>
   <script src="tournament.js"></script>
   <script src="replay.js"></script>

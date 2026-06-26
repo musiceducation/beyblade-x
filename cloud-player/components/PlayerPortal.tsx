@@ -18,6 +18,7 @@ const SYNC_LABELS = {
   synced: '已同步',
   error: '連線失敗',
   unconfigured: '未設定',
+  cached: '離線快取',
 } as const;
 
 function formatUpdatedAt(date: Date | null) {
@@ -33,7 +34,7 @@ export default function PlayerPortal() {
   const [refreshing, setRefreshing] = useState(false);
   const [followSaved, setFollowSaved] = useState('');
 
-  const { syncStatus, configError, arenaState, replays, lastUpdated, refresh } = useArenaData(tab);
+  const { syncStatus, configError, arenaState, replays, lastUpdated, usingCache, refresh } = useArenaData(tab);
 
   const selectReplay = useCallback((id: string | null) => {
     setActiveReplayId(id);
@@ -136,6 +137,9 @@ export default function PlayerPortal() {
         </div>
 
         {configError && <p className="player-config-error">{configError}</p>}
+        {usingCache && syncStatus === 'cached' && (
+          <p className="player-cache-banner">目前顯示離線快取，連線恢復後會自動更新</p>
+        )}
 
         <div className="session-pills" role="tablist" aria-label="場次">
           {(['junior', 'senior'] as const).map((key) => (

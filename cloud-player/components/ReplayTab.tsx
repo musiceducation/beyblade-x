@@ -6,10 +6,12 @@ import {
   PHASE_LABELS,
 } from '@/lib/constants';
 import {
+  applyReplayZoom,
   FINISH_ICONS,
   FINISH_LABELS,
   formatReplayDate,
   formatReplayTime,
+  getReplayZoom,
   groupReplays,
   matchGroupSummary,
   replayBattleDelta,
@@ -19,6 +21,7 @@ import {
 } from '@/lib/replay';
 import { filterReplaysBySession } from '@/lib/tournament';
 import { replayVideoUrl } from '@/lib/supabase';
+import ReplayPlayerBar from '@/components/ReplayPlayerBar';
 import ReplayTheater, { ReplayTheaterMode } from '@/components/ReplayTheater';
 
 type Props = {
@@ -70,6 +73,8 @@ export default function ReplayTab({
     rounds: ArenaReplayRow[];
   } | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
 
   const filteredReplays = useMemo(
     () => filterReplaysBySession(replays, session, search),
@@ -83,6 +88,12 @@ export default function ReplayTab({
     ?? replays.find((r) => r.id === activeReplayId)
     ?? null;
   const activeMeta = activeReplay ? replayMeta(activeReplay) : null;
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !activeReplay?.has_video) return;
+    applyReplayZoom(video, getReplayZoom());
+  }, [activeReplay?.id, activeReplay?.has_video]);
 
   const activeGroup = useMemo(() => {
     if (!activeReplayId) return null;
@@ -180,14 +191,19 @@ export default function ReplayTab({
       {activeReplay && (
         <div className="player-replay-stage" ref={stageRef}>
           {activeReplay.has_video ? (
-            <video
-              key={activeReplay.id}
-              className="player-replay-video"
-              controls
-              playsInline
-              preload="metadata"
-              src={replayVideoUrl(activeReplay.id) || undefined}
-            />
+            <div className="player-replay-video-wrap">
+              <div className="replay-player-viewport" ref={viewportRef}>
+                <video
+                  key={activeReplay.id}
+                  ref={videoRef}
+                  className="player-replay-video"
+                  playsInline
+                  preload="metadata"
+                  src={replayVideoUrl(activeReplay.id) || undefined}
+                />
+              </div>
+              <ReplayPlayerBar videoRef={videoRef} viewportRef={viewportRef} />
+            </div>
           ) : (
             <div className="player-replay-no-video">
               <span aria-hidden="true">📋</span>

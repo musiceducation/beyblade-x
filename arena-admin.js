@@ -1,39 +1,13 @@
 /**
- * Event-day admin: PIN settings, pre-flight checklist, share helpers.
+ * Event-day admin: settings, pre-flight checklist, share helpers.
  */
 
-function initPinSettings() {
+function initAdminSettings() {
   $('#btn-admin-settings')?.addEventListener('click', () => {
     $('#admin-settings-modal').hidden = false;
   });
   $('#admin-settings-modal .admin-modal-backdrop')?.addEventListener('click', () => {
     $('#admin-settings-modal').hidden = true;
-  });
-  $('#btn-pin-cancel')?.addEventListener('click', () => {
-    $('#admin-settings-modal').hidden = true;
-  });
-  $('#btn-pin-save')?.addEventListener('click', () => {
-    const current = $('#pin-current')?.value || '';
-    const next = $('#pin-new')?.value || '';
-    const confirm = $('#pin-confirm')?.value || '';
-    if (current !== getArenaPin()) {
-      alert('目前 PIN 錯誤');
-      return;
-    }
-    if (!/^\d{4,8}$/.test(next)) {
-      alert('新 PIN 須為 4–8 位數字');
-      return;
-    }
-    if (next !== confirm) {
-      alert('兩次輸入不一致');
-      return;
-    }
-    setArenaPin(next);
-    $('#pin-current').value = '';
-    $('#pin-new').value = '';
-    $('#pin-confirm').value = '';
-    $('#admin-settings-modal').hidden = true;
-    if (typeof showToast === 'function') showToast('PIN 已更新');
   });
 
   $('#btn-match-target-save')?.addEventListener('click', () => {
@@ -45,6 +19,19 @@ function initPinSettings() {
     if (typeof setMatchTarget === 'function') setMatchTarget(val);
     if (typeof updateMatchTargetUI === 'function') updateMatchTargetUI();
     if (typeof showToast === 'function') showToast(`已設為 ${val} 分制`);
+  });
+
+  $('#btn-backup-tournament-admin')?.addEventListener('click', () => {
+    if (typeof backupTournamentJson === 'function') backupTournamentJson();
+  });
+  $('#btn-restore-tournament-admin')?.addEventListener('click', () => {
+    $('#restore-tournament-admin-file')?.click();
+  });
+  $('#restore-tournament-admin-file')?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (file && typeof restoreTournamentJson === 'function') {
+      restoreTournamentJson(file).finally(() => { e.target.value = ''; });
+    }
   });
 }
 
@@ -76,6 +63,14 @@ async function runEventChecklist() {
     items.push({ label: '雲端同步', ok: false, hint: '無法連線伺服器' });
   }
 
+  const portalUrl = typeof getPlayerPortalUrl === 'function' ? getPlayerPortalUrl() : null;
+  const portalConfigured = Boolean(portalUrl && !/your-cloud-player|example\.com/i.test(portalUrl));
+  items.push({
+    label: '選手雲端頁',
+    ok: portalConfigured,
+    hint: portalConfigured ? portalUrl.replace(/^https?:\/\//, '') : '請設定 playerPortalUrl',
+  });
+
   try {
     const r = await fetch('/tournament/state.json?since=-1', { cache: 'no-store' });
     const d = await r.json();
@@ -86,8 +81,28 @@ async function runEventChecklist() {
     items.push({ label: '賽程同步', ok: false, hint: '無法讀取' });
   }
 
-  const camOk = typeof state !== 'undefined' && (state.cameraStream || state.cameraMode === 'url' || state.cameraMode === 'remote');
-  items.push({ label: '鏡頭', ok: camOk, hint: camOk ? '已啟用' : '建議：先開鏡頭再全螢幕' });
+  const camSource = $('#cam-source')?.value || 'local';
+  const camLabels = { local: '本機', remote: '手機 QR', dji: 'DJI', url: 'URL' };
+  const camStreamOk = typeof state !== 'undefined' && (
+    state.cameraStream
+    || (state.cameraMode === 'url' && $('#camera-feed-img') && !$('#camera-feed-img').hidden)
+    || (state.cameraMode === 'remote' && state.activeRemoteCall)
+    || (state.cameraMode === 'dji' && state.djiInfo)
+  );
+  items.push({
+    label: '鏡頭來源',
+    ok: camStreamOk,
+    hint: camStreamOk ? `${camLabels[camSource] || camSource} · 已連線` : `${camLabels[camSource] || camSource} · 請至「鏡頭」分頁連接`,
+  });
+
+  const replayPaused = typeof replayState !== 'undefined' && replayState.recordingPaused;
+  const recorderOk = typeof MediaRecorder !== 'undefined'
+    && (MediaRecorder.isTypeSupported('video/webm') || MediaRecorder.isTypeSupported('video/webm;codecs=vp8'));
+  items.push({
+    label: '回放錄製',
+    ok: recorderOk && !replayPaused,
+    hint: !recorderOk ? '此瀏覽器不支援錄影' : replayPaused ? '已暫停（比賽中可關閉上傳）' : 'WebM 錄製可用',
+  });
 
   const competitionOn = typeof isCompetitionMode === 'function' ? isCompetitionMode() : true;
   items.push({
@@ -96,16 +111,26 @@ async function runEventChecklist() {
     hint: competitionOn ? '倒數優先、減少延遲' : '已關閉（不建議現場使用）',
   });
 
-  const pending = typeof replayState !== 'undefined'
-    ? replayState.replays.filter((r) => r.videoId && !r.cloudSynced).length
+  const pendingLan = typeof replayState !== 'undefined'
+    ? replayState.replays.filter((r) => r.videoId && r.serverSynced === false).length
     : 0;
-  const replayPaused = typeof replayState !== 'undefined' && replayState.recordingPaused;
-  items.push({ label: '待上傳回放', ok: pending === 0, hint: pending ? `${pending} 段待傳` : '全部已同步' });
-  items.push({
-    label: '回放錄製',
-    ok: !replayPaused,
-    hint: replayPaused ? '已暫停（比賽中可關閉上傳）' : '錄製與上傳已開啟',
-  });
+  const pendingCloud = typeof replayState !== 'undefined' && typeof isSupabaseSyncEnabled === 'function' && isSupabaseSyncEnabled()
+    ? replayState.replays.filter((r) => r.videoId && r.cloudSynced === false).length
+    : 0;
+  const pending = pendingLan + pendingCloud;
+  items.push({ label: '待上傳回放', ok: pending === 0, hint: pending ? `LAN ${pendingLan} · 雲 ${pendingCloud}` : '全部已同步' });
+
+  const retryBtn = $('#btn-checklist-retry-replays');
+  if (retryBtn) retryBtn.hidden = pending === 0;
+
+  const toggle = $('#competition-mode-toggle');
+  if (toggle && typeof isCompetitionMode === 'function') {
+    toggle.checked = isCompetitionMode();
+  }
+  const lowFxToggle = $('#low-fx-mode-toggle');
+  if (lowFxToggle && typeof isLowFxMode === 'function') {
+    lowFxToggle.checked = isLowFxMode();
+  }
 
   const list = $('#checklist-items');
   if (!list) return items;
@@ -128,11 +153,6 @@ async function runEventChecklist() {
     summary.dataset.status = warn === 0 ? 'ok' : critical > 0 ? 'critical' : 'warn';
   }
 
-  const toggle = $('#competition-mode-toggle');
-  if (toggle && typeof isCompetitionMode === 'function') {
-    toggle.checked = isCompetitionMode();
-  }
-
   return items;
 }
 
@@ -145,9 +165,48 @@ function initEventChecklist() {
     $('#event-checklist-modal').hidden = true;
   });
   $('#btn-checklist-refresh')?.addEventListener('click', () => runEventChecklist());
+  $('#btn-checklist-retry-replays')?.addEventListener('click', async () => {
+    if (typeof retryPendingReplayUploads === 'function') {
+      await retryPendingReplayUploads();
+      if (typeof showToast === 'function') showToast('已重試待上傳回放');
+    }
+    runEventChecklist();
+  });
   $('#btn-checklist-close')?.addEventListener('click', () => {
     $('#event-checklist-modal').hidden = true;
   });
+}
+
+const SHORTCUT_ROWS = [
+  ['?', '顯示／關閉快捷鍵說明'],
+  ['1 / 2 / 3 / 4', '紅方：殘存 / 爆裂 / 擊飛 / 極致'],
+  ['7 / 8 / 9 / 0', '藍方：殘存 / 爆裂 / 擊飛 / 極致'],
+  ['Z', '撤銷上一個得分'],
+  ['N', '下一局'],
+  ['L', 'Go Shoot 倒數'],
+  ['Space', '待機時開始倒數／準備下一局'],
+  ['Esc', '返回賽程（同 ✕ 賽程，不退出全螢幕）'],
+];
+
+function toggleShortcutsModal(show) {
+  const modal = $('#shortcuts-modal');
+  if (!modal) return;
+  const open = show === undefined ? modal.hidden : show;
+  modal.hidden = !open;
+  if (open) {
+    const list = $('#shortcuts-list');
+    if (list) {
+      list.innerHTML = SHORTCUT_ROWS.map(([key, desc]) =>
+        `<tr><td><kbd>${key}</kbd></td><td>${desc}</td></tr>`,
+      ).join('');
+    }
+  }
+}
+
+function initShortcutsModal() {
+  $('#btn-shortcuts-help')?.addEventListener('click', () => toggleShortcutsModal(true));
+  $('#shortcuts-modal .admin-modal-backdrop')?.addEventListener('click', () => toggleShortcutsModal(false));
+  $('#btn-shortcuts-close')?.addEventListener('click', () => toggleShortcutsModal(false));
 }
 
 function shareScheduleText() {
@@ -182,7 +241,8 @@ function initShareSchedule() {
 }
 
 function initArenaAdmin() {
-  initPinSettings();
+  initAdminSettings();
   initEventChecklist();
   initShareSchedule();
+  initShortcutsModal();
 }

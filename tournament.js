@@ -260,7 +260,6 @@ async function restoreTournamentJson(file) {
     return;
   }
   if (!confirm('還原備份會覆蓋目前賽程，確定？')) return;
-  if (typeof confirmArenaPin === 'function' && !confirmArenaPin('還原賽程備份')) return;
 
   const all = loadTournamentStorage();
   if (payload.junior) all.junior = { ...createEmptySessionData(), ...payload.junior };
@@ -288,8 +287,10 @@ async function restoreTournamentJson(file) {
 async function pollTournamentState() {
   if (!tournamentSync.enabled) return;
 
+  const pollMs = document.hidden ? 4000 : SYNC_POLL_MS;
+
   if (tournamentSync.pendingConflict) {
-    tournamentSync.pollTimer = setTimeout(pollTournamentState, SYNC_POLL_MS);
+    tournamentSync.pollTimer = setTimeout(pollTournamentState, pollMs);
     return;
   }
 
@@ -304,7 +305,7 @@ async function pollTournamentState() {
     updateSyncIndicator('offline');
   }
 
-  tournamentSync.pollTimer = setTimeout(pollTournamentState, SYNC_POLL_MS);
+  tournamentSync.pollTimer = setTimeout(pollTournamentState, pollMs);
 }
 
 function updateSyncIndicator(status) {
@@ -756,8 +757,8 @@ function recordMatchWinner(matchId, winnerSide, result) {
   return true;
 }
 
-function adminRequirePin(actionLabel) {
-  return typeof confirmArenaPin === 'function' && confirmArenaPin(actionLabel);
+function adminRequirePin() {
+  return true;
 }
 
 function adminResetMatchFields(match) {
@@ -1097,7 +1098,6 @@ function runDraw() {
 
 function resetTournament() {
   if (!confirm('清除本場抽籤與賽程？（選手名單保留）')) return;
-  if (typeof confirmArenaPin === 'function' && !confirmArenaPin('重設賽程')) return;
   tournamentState.drawn = false;
   tournamentState.matches = {};
   tournamentState.eliminatedIds = [];

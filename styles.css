@@ -250,6 +250,12 @@ body.shake-go-shoot { animation: screenShakeGoShoot 1s cubic-bezier(0.22, 1, 0.3
 
 .header-controls { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
+#btn-fullscreen.fullscreen-locked {
+  border-color: var(--gold);
+  color: var(--gold);
+  box-shadow: 0 0 12px rgba(255, 214, 10, 0.35);
+}
+
 /* App navigation tabs */
 .app-nav {
   display: flex;
@@ -2501,15 +2507,146 @@ body.launch-active #camera-feed-img.mirrored {
   top: 0.75rem;
 }
 
-.replay-video {
-  width: 100%;
-  max-height: 220px;
-  border-radius: calc(var(--radius) - 2px);
-  background: #000;
+.replay-video-wrap {
   margin-bottom: 0.75rem;
 }
 
+.replay-player-viewport {
+  overflow: hidden;
+  border-radius: calc(var(--radius) - 2px) calc(var(--radius) - 2px) 0 0;
+  background: #000;
+  line-height: 0;
+}
+
+.replay-theater-viewport {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+}
+
+.replay-theater-viewport .replay-theater-video {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.replay-video {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  background: #000;
+  margin-bottom: 0;
+  transition: transform 0.15s ease;
+}
+
 .replay-video[hidden] { display: none; }
+
+.replay-player-bar {
+  padding: 0.4rem 0.5rem 0.5rem;
+  border-radius: 0 0 calc(var(--radius) - 2px) calc(var(--radius) - 2px);
+  background: rgba(0, 0, 0, 0.88);
+  border: 1px solid var(--border);
+  border-top: none;
+}
+
+.replay-player-bar[hidden] {
+  display: none;
+}
+
+.replay-player-speed-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.35rem;
+}
+
+.btn-replay-player-zoom {
+  padding: 0.3rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-replay-player-zoom:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.btn-replay-player-zoom.is-active {
+  border-color: var(--gold, #ffd166);
+  color: var(--gold, #ffd166);
+}
+
+.replay-player-speed {
+  min-width: 5.5rem;
+  padding: 0.3rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.replay-player-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.replay-player-progress--wide {
+  padding: 0.45rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(8px);
+}
+
+.btn-replay-player-play {
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.btn-replay-player-play:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.replay-player-time {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.75);
+  min-width: 2.2rem;
+}
+
+.replay-player-scrubber {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 0.35rem;
+  accent-color: var(--gold, #ffd166);
+  cursor: pointer;
+}
 
 .replay-player-meta h3 {
   margin: 0 0 0.25rem;
@@ -2620,6 +2757,7 @@ body.replay-playing .btn-finish {
   height: 100%;
   object-fit: contain;
   background: #000;
+  transition: transform 0.15s ease;
 }
 
 .replay-theater-video:not([src]),
@@ -2637,16 +2775,60 @@ body.replay-playing .btn-finish {
     linear-gradient(to bottom, rgba(0, 0, 0, 0.45) 0%, transparent 22%);
 }
 
+.replay-theater-footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 4.75rem;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+}
+
 .replay-theater-hud {
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  z-index: 1;
+  padding: 1rem 1rem 0.35rem;
+  text-align: center;
+  pointer-events: none;
+  contain: layout style;
+}
+
+.replay-theater-chrome {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 4;
-  padding: 1rem 1rem max(1.25rem, env(safe-area-inset-bottom));
-  text-align: center;
+  z-index: 10;
   pointer-events: none;
-  contain: layout style;
+  padding: 0 0.75rem max(0.65rem, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.35rem;
+}
+
+.replay-theater-chrome[hidden] {
+  display: none;
+}
+
+.replay-theater-chrome .replay-player-speed-row,
+.replay-theater-chrome .replay-player-progress {
+  pointer-events: auto;
+}
+
+.replay-theater-chrome .replay-player-speed-row {
+  justify-content: flex-end;
+  padding-right: max(0, env(safe-area-inset-right));
+}
+
+.replay-theater-chrome .replay-player-progress--wide {
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .replay-hud-battle {
@@ -2741,7 +2923,7 @@ body.replay-theater-active {
 
 body.replay-theater-active #fx-layer {
   z-index: 12050;
-  bottom: 9.5rem;
+  bottom: 12rem;
   height: auto;
 }
 
@@ -4576,6 +4758,41 @@ body.replay-theater-active .finish-announce {
 .checklist-competition-toggle input {
   margin-top: 0.15rem;
   flex-shrink: 0;
+}
+
+.admin-modal-card--wide {
+  max-width: 28rem;
+}
+
+.shortcuts-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.82rem;
+  color: var(--text-muted, #8e8e93);
+}
+
+.shortcuts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  margin-bottom: 0.5rem;
+}
+
+.shortcuts-table td {
+  padding: 0.35rem 0.25rem;
+  vertical-align: top;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.shortcuts-table kbd {
+  display: inline-block;
+  min-width: 1.5rem;
+  padding: 0.15rem 0.45rem;
+  font-family: inherit;
+  font-size: 0.78rem;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  white-space: nowrap;
 }
 
 body.scoring-locked .btn-finish,

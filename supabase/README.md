@@ -39,7 +39,7 @@ window.ARENA_CONFIG = {
 }
 ```
 
-啟動 `./start.sh`。賽程變更同回放結束後會經本機 `/cloud/*` 代理 sync 去 Supabase。  
+啟動 `"./start.sh"`（路徑含空格時請加引號）。賽程變更同回放結束後會經本機 `/cloud/*` 代理 sync 去 Supabase。  
 「選手·賽程」分頁 QR 會用 `playerPortalUrl`（有設定時）。
 
 ## 3. Vercel（cloud-player）

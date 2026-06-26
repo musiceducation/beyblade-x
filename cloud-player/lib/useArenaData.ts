@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArenaReplayRow, ArenaStateRow } from '@/lib/constants';
 import { getEventSlug, getSupabase } from '@/lib/supabase';
+import { loadArenaCache, saveArenaCache } from '@/lib/cache';
 
-export type SyncStatus = 'connecting' | 'synced' | 'error' | 'unconfigured';
+export type SyncStatus = 'connecting' | 'synced' | 'error' | 'unconfigured' | 'cached';
 
 const LIVE_POLL_MS = 800;
 const IDLE_POLL_MS = 4000;
-const REPLAY_POLL_MS = 6000;
+const REPLAY_POLL_MS = 12000;
 
 export function useArenaData(tab: 'live' | 'schedule' | 'replay' | 'results') {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('connecting');
@@ -16,8 +17,27 @@ export function useArenaData(tab: 'live' | 'schedule' | 'replay' | 'results') {
   const [arenaState, setArenaState] = useState<ArenaStateRow | null>(null);
   const [replays, setReplays] = useState<ArenaReplayRow[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [usingCache, setUsingCache] = useState(false);
   const revisionRef = useRef(-1);
   const replayHashRef = useRef('');
+
+  const applyCacheFallback = useCallback(() => {
+    const slug = getEventSlug();
+    const cached = loadArenaCache(slug);
+    if (!cached) return false;
+    if (cached.arenaState) {
+      revisionRef.current = cached.arenaState.revision ?? revisionRef.current;
+      setArenaState(cached.arenaState);
+    }
+    if (cached.replays.length) {
+      replayHashRef.current = cached.replays.map((r) => `${r.id}:${r.has_video}`).join('|');
+      setReplays(cached.replays);
+    }
+    setLastUpdated(new Date(cached.savedAt));
+    setUsingCache(true);
+    setSyncStatus('cached');
+    return true;
+  }, []);
 
   const fetchArenaState = useCallback(async () => {
     const supabase = getSupabase();
@@ -67,6 +87,13 @@ export function useArenaData(tab: 'live' | 'schedule' | 'replay' | 'results') {
     return true;
   }, []);
 
+  const persistCache = useCallback((state: ArenaStateRow | null, replayRows: ArenaReplayRow[]) => {
+    const slug = getEventSlug();
+    if (slug && (state || replayRows.length)) {
+      saveArenaCache(slug, state, replayRows);
+    }
+  }, []);
+
   const refresh = useCallback(async (opts?: { forceReplays?: boolean }) => {
     const supabase = getSupabase();
     if (!supabase) {
@@ -83,13 +110,29 @@ export function useArenaData(tab: 'live' | 'schedule' | 'replay' | 'results') {
       ]);
       setSyncStatus('synced');
       setConfigError(null);
+      setUsingCache(false);
       setLastUpdated(new Date());
     } catch {
-      setSyncStatus('error');
+      if (applyCacheFallback()) {
+        setConfigError(null);
+      } else {
+        setSyncStatus('error');
+      }
     }
-  }, [fetchArenaState, fetchReplays, tab]);
+  }, [fetchArenaState, fetchReplays, tab, applyCacheFallback]);
 
   useEffect(() => {
+    const slug = getEventSlug();
+    const cached = loadArenaCache(slug);
+    if (cached?.arenaState) {
+      revisionRef.current = cached.arenaState.revision ?? -1;
+      setArenaState(cached.arenaState);
+      if (cached.replays.length) {
+        replayHashRef.current = cached.replays.map((r) => `${r.id}:${r.has_video}`).join('|');
+        setReplays(cached.replays);
+      }
+      setLastUpdated(new Date(cached.savedAt));
+    }
     refresh({ forceReplays: tab === 'replay' });
     const ms = tab === 'live' ? LIVE_POLL_MS : tab === 'replay' ? REPLAY_POLL_MS : IDLE_POLL_MS;
     const id = setInterval(() => refresh(), ms);
@@ -97,12 +140,18 @@ export function useArenaData(tab: 'live' | 'schedule' | 'replay' | 'results') {
   }, [refresh, tab]);
 
   useEffect(() => {
+    if (syncStatus === 'synced' && (arenaState || replays.length)) {
+      persistCache(arenaState, replays);
+    }
+  }, [arenaState, replays, syncStatus, persistCache]);
+
+  useEffect(() => {
     const supabase = getSupabase();
     const slug = getEventSlug();
     if (!supabase) return;
 
     const channel = supabase
-      .channel(`arena_state:${slug}`)
+      .channel(`arena:${slug}`)
       .on(
         'postgres_changes',
         {
@@ -119,7 +168,26 @@ export function useArenaData(tab: 'live' | 'schedule' | 'replay' | 'results') {
             setArenaState(row);
             setLastUpdated(new Date());
             setSyncStatus('synced');
+            setUsingCache(false);
           }
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'arena_replays',
+          filter: `event_slug=eq.${slug}`,
+        },
+        () => {
+          fetchReplays()
+            .then(() => {
+              setLastUpdated(new Date());
+              setSyncStatus('synced');
+              setUsingCache(false);
+            })
+            .catch(() => {});
         },
       )
       .subscribe();
@@ -127,7 +195,7 @@ export function useArenaData(tab: 'live' | 'schedule' | 'replay' | 'results') {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [fetchReplays]);
 
   useEffect(() => {
     if (tab !== 'replay') return;
@@ -140,6 +208,7 @@ export function useArenaData(tab: 'live' | 'schedule' | 'replay' | 'results') {
     arenaState,
     replays,
     lastUpdated,
+    usingCache,
     refresh,
   };
 }

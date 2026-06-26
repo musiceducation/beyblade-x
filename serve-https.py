@@ -1209,6 +1209,8 @@ class ArenaHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         SIGNAL_ROOMS.setdefault(room, {})[kind] = payload
+        if kind == 'answer':
+            SIGNAL_ROOMS.get(room, {}).pop('offer', None)
         self._send_json({'ok': True})
 
 

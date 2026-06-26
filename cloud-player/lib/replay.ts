@@ -133,6 +133,7 @@ export async function prepareReplayVideo(video: HTMLVideoElement, url: string): 
     await video.play();
     video.muted = false;
     video.volume = 1;
+    applyReplayPlaybackRate(video);
   } catch (err) {
     replayDebug('autoplay blocked', err);
   }
@@ -296,4 +297,89 @@ export async function downloadCloudReplay(
   } finally {
     onStatus?.('idle');
   }
+}
+
+/** Shared with arena host — same localStorage keys for speed / zoom prefs */
+export const REPLAY_SPEED_KEY = 'bex-replay-speed';
+export const REPLAY_ZOOM_KEY = 'bex-replay-zoom';
+export const REPLAY_SPEED_OPTIONS = [0.25, 0.5, 0.75, 1] as const;
+export const REPLAY_ZOOM_OPTIONS = [1, 1.5, 2] as const;
+export const DEFAULT_REPLAY_SPEED = 0.5;
+
+export function formatVideoClock(sec: number) {
+  if (!Number.isFinite(sec) || sec < 0) return '0:00';
+  const total = Math.floor(sec);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+export function getReplayPlaybackRate() {
+  if (typeof window === 'undefined') return DEFAULT_REPLAY_SPEED;
+  const v = parseFloat(localStorage.getItem(REPLAY_SPEED_KEY) || String(DEFAULT_REPLAY_SPEED));
+  return (REPLAY_SPEED_OPTIONS as readonly number[]).includes(v) ? v : DEFAULT_REPLAY_SPEED;
+}
+
+export function setReplayPlaybackRate(rate: number) {
+  if (typeof window === 'undefined') return;
+  if (!(REPLAY_SPEED_OPTIONS as readonly number[]).includes(rate)) return;
+  localStorage.setItem(REPLAY_SPEED_KEY, String(rate));
+}
+
+export function getReplayZoom() {
+  if (typeof window === 'undefined') return 1;
+  const v = parseFloat(localStorage.getItem(REPLAY_ZOOM_KEY) || '1');
+  return (REPLAY_ZOOM_OPTIONS as readonly number[]).includes(v) ? v : 1;
+}
+
+export function setReplayZoom(zoom: number) {
+  if (typeof window === 'undefined') return;
+  if (!(REPLAY_ZOOM_OPTIONS as readonly number[]).includes(zoom)) return;
+  localStorage.setItem(REPLAY_ZOOM_KEY, String(zoom));
+}
+
+export function cycleReplayZoom() {
+  const cur = getReplayZoom();
+  const idx = REPLAY_ZOOM_OPTIONS.indexOf(cur as typeof REPLAY_ZOOM_OPTIONS[number]);
+  const next = REPLAY_ZOOM_OPTIONS[(idx + 1) % REPLAY_ZOOM_OPTIONS.length];
+  setReplayZoom(next);
+  return next;
+}
+
+export function replayZoomLabel(zoom: number) {
+  if (zoom <= 1) return '🔍 1×';
+  if (zoom === 1.5) return '🔍 1.5×';
+  return '🔍 2×';
+}
+
+export function applyReplayZoom(video: HTMLVideoElement | null, zoom: number) {
+  if (!video) return;
+  video.style.transform = zoom === 1 ? '' : `scale(${zoom})`;
+  video.style.transformOrigin = 'center center';
+}
+
+export function applyReplayPlaybackRate(video: HTMLVideoElement | null, rate?: number) {
+  if (!video) return;
+  const r = rate ?? getReplayPlaybackRate();
+  video.defaultPlaybackRate = r;
+  video.playbackRate = r;
+}
+
+export function replayScaleMs(ms: number) {
+  const rate = getReplayPlaybackRate();
+  return rate > 0 ? ms / rate : ms;
+}
+
+export function scoresAtVideoTime(
+  schedule: FinishScheduleEntry[],
+  timeSec: number,
+  startScores: [number, number],
+): [number, number] {
+  let scores: [number, number] = [...startScores];
+  schedule.forEach((entry) => {
+    if (entry.videoSeek != null && entry.videoSeek <= timeSec + 0.05 && entry.event.scores) {
+      scores = [entry.event.scores[0], entry.event.scores[1]];
+    }
+  });
+  return scores;
 }
