@@ -2,10 +2,20 @@
  * Tournament — roster, draw, bracket schedule
  */
 
-const MAX_PLAYERS = 16;
+const QUARTER_ENTRANTS = 8;
+const REVIVAL_FINAL_LABEL = '逆轉小羊決賽';
 const STORAGE_KEY = 'beyblade-tournament-v1';
 const SYNC_POLL_MS = 1500;
 const LIVE_SYNC_DEBOUNCE_MS = 200;
+
+function isTournamentDebug() {
+  return localStorage.getItem('bex-tournament-debug') === '1'
+    || new URLSearchParams(location.search).has('debug');
+}
+
+function tournamentDebug(...args) {
+  if (isTournamentDebug()) console.log('[tournament]', ...args);
+}
 
 const tournamentSync = {
   enabled: false,
@@ -427,6 +437,8 @@ function buildBracketFromDraw(playerIds) {
     matches.prelim.push(makeMatch('prelim', idx, shuffled[i], shuffled[i + 1] || null, `初賽 ${idx + 1}`));
   }
 
+  matches.playoff = [];
+
   matches.quarter = Array.from({ length: 4 }, (_, i) =>
     makeMatch('quarter', i, null, null, `複賽 ${i + 1}`)
   );
@@ -444,18 +456,122 @@ function buildBracketFromDraw(playerIds) {
   return matches;
 }
 
-function setupRevivalBracket(eliminatedIds) {
-  const prelimLosers = new Set(getPrelimLosers());
-  const entrants = eliminatedIds.filter((id) => prelimLosers.has(id));
-  const shuffled = shuffle(entrants);
+function isPrelimComplete() {
+  const prelim = tournamentState.matches.prelim;
+  return Boolean(prelim?.length && prelim.every((x) => x.status === 'done'));
+}
+
+function getPrelimWinners() {
+  const prelim = tournamentState.matches.prelim;
+  if (!prelim) return [];
+  return prelim.map((x) => x.winnerId).filter(Boolean);
+}
+
+function playoffRoundFromLabel(label) {
+  const m = /^附加賽 R(\d+)-/.exec(label || '');
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+function revivalRoundFromLabel(label) {
+  if (label === REVIVAL_FINAL_LABEL) return 999;
+  const m = /^復活 R(\d+)-/.exec(label || '');
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+function getRevivalRoundNumbers(rev) {
+  const nums = new Set();
+  rev.forEach((m) => {
+    const n = revivalRoundFromLabel(m.label);
+    if (n && n !== 999) nums.add(n);
+  });
+  return [...nums].sort((a, b) => a - b);
+}
+
+function syncPlayoffMatches() {
+  const m = tournamentState.matches;
+  if (!isPrelimComplete()) return;
+
+  const prelimWinners = getPrelimWinners();
+  if (prelimWinners.length <= QUARTER_ENTRANTS) {
+    if (m.playoff?.length) m.playoff = [];
+    return;
+  }
+
+  if (!m.playoff) m.playoff = [];
+
+  let pool = [...prelimWinners];
+  let round = 1;
+
+  while (pool.length > QUARTER_ENTRANTS) {
+    const roundMatches = m.playoff.filter((x) => playoffRoundFromLabel(x.label) === round);
+    if (!roundMatches.length) {
+      const excess = pool.length - QUARTER_ENTRANTS;
+      const playersInMatches = Math.min(excess * 2, pool.length);
+      const shuffled = shuffle(pool);
+      const playing = shuffled.slice(0, playersInMatches);
+      const byeIds = shuffled.slice(playersInMatches);
+      for (let i = 0; i < playing.length; i += 2) {
+        const match = makeMatch(
+          'playoff',
+          m.playoff.length,
+          playing[i],
+          playing[i + 1] || null,
+          `附加賽 R${round}-${Math.floor(i / 2) + 1}`,
+        );
+        if (i === 0) match.playoffByes = byeIds;
+        m.playoff.push(match);
+      }
+      m.playoff.filter((x) => playoffRoundFromLabel(x.label) === round).forEach(autoAdvanceBye);
+      tournamentDebug('playoff round created', { round, pool: pool.length, matches: playersInMatches / 2, byes: byeIds.length });
+      return;
+    }
+
+    roundMatches.forEach(autoAdvanceBye);
+    if (!roundMatches.every((x) => x.status === 'done')) return;
+
+    const winners = roundMatches.map((x) => x.winnerId).filter(Boolean);
+    const byes = roundMatches[0]?.playoffByes || [];
+    pool = [...byes, ...winners];
+    round += 1;
+  }
+}
+
+function getQuarterEntrantPool() {
+  if (!isPrelimComplete()) return null;
+
+  const prelimWinners = getPrelimWinners();
+  if (prelimWinners.length <= QUARTER_ENTRANTS) return prelimWinners;
+
+  let pool = [...prelimWinners];
+  let round = 1;
+  const playoff = tournamentState.matches.playoff || [];
+
+  while (pool.length > QUARTER_ENTRANTS) {
+    const roundMatches = playoff.filter((x) => playoffRoundFromLabel(x.label) === round);
+    if (!roundMatches.length || !roundMatches.every((x) => x.status === 'done')) return null;
+    const winners = roundMatches.map((x) => x.winnerId).filter(Boolean);
+    const byes = roundMatches[0]?.playoffByes || [];
+    pool = [...byes, ...winners];
+    round += 1;
+  }
+  return pool;
+}
+
+function setupRevivalBracket(prelimLosers) {
+  if (prelimLosers.length < 2) {
+    tournamentState.matches.revival = [];
+    return;
+  }
+  if (tournamentState.matches.revival?.length) return;
+
+  const shuffled = shuffle([...prelimLosers]);
   const rev = [];
   for (let i = 0; i < shuffled.length; i += 2) {
-    rev.push(makeMatch('revival', rev.length, shuffled[i], shuffled[i + 1] || null, `復活 R1-${Math.floor(i / 2) + 1}`));
+    rev.push(makeMatch('revival', i, shuffled[i], shuffled[i + 1] || null, `復活 R1-${Math.floor(i / 2) + 1}`));
   }
-  rev.push(makeMatch('revival', rev.length, null, null, '復活 R2-1'));
-  rev.push(makeMatch('revival', rev.length, null, null, '復活 R2-2'));
-  rev.push(makeMatch('revival', rev.length, null, null, '逆轉小羊決賽'));
   tournamentState.matches.revival = rev;
+  rev.forEach(autoAdvanceBye);
+  tournamentDebug('revival bracket created', { entrants: prelimLosers.length, matches: rev.length });
 }
 
 function autoAdvanceBye(match) {
@@ -469,46 +585,57 @@ function autoAdvanceBye(match) {
   }
 }
 
+function setRevivalWinner(winnerId) {
+  if (!winnerId) return;
+  tournamentState.revivalWinnerId = winnerId;
+  if (tournamentState.matches.challenge) {
+    tournamentState.matches.challenge.p1Id = winnerId;
+  }
+}
+
 function advanceRevival() {
   const rev = tournamentState.matches.revival;
-  if (!rev || rev.length === 0) return;
+  if (!rev?.length) return;
 
-  const r1 = rev.filter((m) => m.label.startsWith('復活 R1'));
-  r1.forEach(autoAdvanceBye);
-  if (r1.length && r1.every((m) => m.status === 'done')) {
-    const w = r1.map((m) => m.winnerId).filter(Boolean);
-    const r2a = rev.find((m) => m.label === '復活 R2-1');
-    const r2b = rev.find((m) => m.label === '復活 R2-2');
-    if (r2a && w[0] && r2a.status !== 'done') {
-      r2a.p1Id = w[0];
-      r2a.p2Id = w[1] || null;
-      autoAdvanceBye(r2a);
-    }
-    if (r2b && w[2] && r2b.status !== 'done') {
-      r2b.p1Id = w[2];
-      r2b.p2Id = w[3] || null;
-      autoAdvanceBye(r2b);
-    }
+  rev.forEach(autoAdvanceBye);
+
+  const revFinal = rev.find((m) => m.label === REVIVAL_FINAL_LABEL);
+  if (revFinal?.status === 'done' && revFinal.winnerId) {
+    setRevivalWinner(revFinal.winnerId);
+    return;
+  }
+  if (revFinal && revFinal.status !== 'done') return;
+
+  const numericRounds = getRevivalRoundNumbers(rev);
+  if (!numericRounds.length) return;
+
+  const lastRound = Math.max(...numericRounds);
+  const lastMatches = rev.filter((m) => revivalRoundFromLabel(m.label) === lastRound);
+  if (!lastMatches.every((m) => m.status === 'done')) return;
+
+  const winners = lastMatches.map((m) => m.winnerId).filter(Boolean);
+  if (winners.length <= 1) {
+    if (winners.length === 1) setRevivalWinner(winners[0]);
+    return;
   }
 
-  const r2 = rev.filter((m) => m.label.startsWith('復活 R2'));
-  const final = rev.find((m) => m.label === '逆轉小羊決賽');
-  r2.forEach(autoAdvanceBye);
-  const activeR2 = r2.filter((m) => m.p1Id || m.p2Id);
-  if (activeR2.length && activeR2.every((m) => m.status === 'done') && final && final.status !== 'done') {
-    const w = activeR2.map((m) => m.winnerId).filter(Boolean);
-    final.p1Id = w[0] || null;
-    final.p2Id = w[1] || null;
-    autoAdvanceBye(final);
+  const nextRound = lastRound + 1;
+  const shuffled = shuffle(winners);
+  if (shuffled.length === 2) {
+    rev.push(makeMatch('revival', rev.length, shuffled[0], shuffled[1], REVIVAL_FINAL_LABEL));
+    return;
   }
 
-  const revFinal = rev.find((m) => m.label === '逆轉小羊決賽');
-  if (revFinal?.winnerId) {
-    tournamentState.revivalWinnerId = revFinal.winnerId;
-    if (tournamentState.matches.challenge) {
-      tournamentState.matches.challenge.p1Id = revFinal.winnerId;
-    }
+  for (let i = 0; i < shuffled.length; i += 2) {
+    rev.push(makeMatch(
+      'revival',
+      rev.length,
+      shuffled[i],
+      shuffled[i + 1] || null,
+      `復活 R${nextRound}-${Math.floor(i / 2) + 1}`,
+    ));
   }
+  rev.filter((m) => revivalRoundFromLabel(m.label) === nextRound).forEach(autoAdvanceBye);
 }
 
 function getPrelimLosers() {
@@ -532,7 +659,8 @@ function isQuarterComplete() {
 function isRevivalComplete() {
   const rev = tournamentState.matches.revival;
   if (!rev?.length) return true;
-  const revFinal = rev.find((m) => m.label === '逆轉小羊決賽');
+  if (tournamentState.revivalWinnerId) return true;
+  const revFinal = rev.find((m) => m.label === REVIVAL_FINAL_LABEL);
   return revFinal?.status === 'done' && !!revFinal.winnerId;
 }
 
@@ -587,29 +715,46 @@ function advanceWinners() {
   const m = tournamentState.matches;
   if (!m.prelim) return;
 
-  const prelimWinners = m.prelim.map((x) => x.winnerId).filter(Boolean);
-  const prelimLosers = getPrelimLosers();
-
-  for (let i = 0; i < 4; i++) {
-    if (m.quarter[i]) {
-      m.quarter[i].p1Id = prelimWinners[i * 2] || null;
-      m.quarter[i].p2Id = prelimWinners[i * 2 + 1] || null;
-      if (m.quarter[i].p1Id && !m.quarter[i].p2Id) {
-        m.quarter[i].winnerId = m.quarter[i].p1Id;
-        m.quarter[i].status = 'done';
-      } else if (!m.quarter[i].p1Id && !m.quarter[i].p2Id) {
-        m.quarter[i].status = 'pending';
-        m.quarter[i].winnerId = null;
-      }
+  if (!isPrelimComplete()) {
+    if (m.playoff?.length) m.playoff = [];
+    if (m.revival?.length) {
+      m.revival = [];
+      tournamentState.revivalWinnerId = null;
     }
   }
 
+  const prelimLosers = getPrelimLosers();
+
+  syncPlayoffMatches();
+  const quarterPool = getQuarterEntrantPool();
+  if (quarterPool) {
+    for (let i = 0; i < 4; i++) {
+      if (m.quarter[i]) {
+        m.quarter[i].p1Id = quarterPool[i * 2] || null;
+        m.quarter[i].p2Id = quarterPool[i * 2 + 1] || null;
+        autoAdvanceBye(m.quarter[i]);
+        if (!m.quarter[i].p1Id && !m.quarter[i].p2Id) {
+          m.quarter[i].status = 'pending';
+          m.quarter[i].winnerId = null;
+        }
+      }
+    }
+  } else if (!isPrelimComplete() || getPrelimWinners().length > QUARTER_ENTRANTS) {
+    clearPendingBracketSlots(m.quarter);
+  }
+
   tournamentState.eliminatedIds = prelimLosers;
-  if (prelimLosers.length >= 2 && m.prelim.every((x) => x.status === 'done') && !m.revival?.length) {
+  if (prelimLosers.length >= 2 && isPrelimComplete() && !m.revival?.length) {
     setupRevivalBracket(prelimLosers);
   }
 
   advanceRevival();
+  tournamentDebug('advanceWinners', {
+    players: tournamentState.players.length,
+    prelimDone: isPrelimComplete(),
+    quarterPool: quarterPool?.length ?? null,
+    revivalWinner: tournamentState.revivalWinnerId,
+  });
 
   const topFour = getOfficialTopFour();
   if (topFour && m.semi) {
@@ -630,7 +775,7 @@ function advanceWinners() {
   }
 }
 
-const PHASE_ORDER = { prelim: 0, revival: 1, quarter: 2, challenge: 3, semi: 4, final: 5 };
+const PHASE_ORDER = { prelim: 0, playoff: 1, revival: 2, quarter: 3, challenge: 4, semi: 5, final: 6 };
 
 function getAllMatchesFlat() {
   return getAllMatches({ matches: tournamentState.matches });
@@ -1043,10 +1188,6 @@ function drawRandomChallengeOpponent(forceRedraw = false) {
 function addPlayer(name) {
   const trimmed = (name || '').trim();
   if (!trimmed) return false;
-  if (tournamentState.players.length >= MAX_PLAYERS) {
-    alert(`每場最多 ${MAX_PLAYERS} 人`);
-    return false;
-  }
   if (tournamentState.players.some((p) => p.name === trimmed)) return false;
   tournamentState.players.push({ id: genId(), name: trimmed });
   persistSession();
@@ -1239,7 +1380,7 @@ function renderRosterList() {
     list.appendChild(li);
   });
 
-  if (count) count.textContent = `${tournamentState.players.length} / ${MAX_PLAYERS}`;
+  if (count) count.textContent = `${tournamentState.players.length} 人`;
 
   list.querySelectorAll('.roster-name-input').forEach((input) => {
     input.addEventListener('change', () => {
@@ -1264,8 +1405,19 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
+function bracketPhaseSubtitle(phase) {
+  const n = tournamentState.players.length;
+  if (phase === 'prelim') return `${n} → ${Math.ceil(n / 2)}`;
+  if (phase === 'playoff') {
+    const w = getPrelimWinners().length;
+    return w > QUARTER_ENTRANTS ? `${w} → ${QUARTER_ENTRANTS}` : '';
+  }
+  return PHASE_STYLES[phase]?.sub || '';
+}
+
 const PHASE_STYLES = {
-  prelim: { title: '初賽', sub: '16 → 8', cls: 'phase-prelim' },
+  prelim: { title: '初賽', sub: '', cls: 'phase-prelim' },
+  playoff: { title: '附加賽', sub: '晉級複賽', cls: 'phase-playoff' },
   revival: { title: '復活賽', sub: '僅初賽落敗者', cls: 'phase-revival' },
   quarter: { title: '複賽', sub: '8 → 4 · 落敗直接淘汰', cls: 'phase-quarter' },
   challenge: { title: '四強挑戰', sub: '小羊抽籤', cls: 'phase-challenge' },
@@ -1367,12 +1519,13 @@ function renderBracketColumn(phaseKey, matches) {
   if (!matches || (Array.isArray(matches) && matches.length === 0)) return '';
   const list = Array.isArray(matches) ? matches : [matches];
   const meta = PHASE_STYLES[phaseKey] || { title: phaseKey, sub: '', cls: '' };
+  const sub = bracketPhaseSubtitle(phaseKey) || meta.sub;
   const done = list.filter((m) => m.status === 'done').length;
 
   return `<div class="bracket-column ${meta.cls}">
     <div class="bracket-column-head">
       <h3 class="bracket-column-title">${meta.title}</h3>
-      <span class="bracket-column-sub">${meta.sub}</span>
+      <span class="bracket-column-sub">${sub}</span>
       <span class="bracket-column-progress">${done}/${list.length}</span>
     </div>
     <ul class="bracket-matches">${list.map(renderMatchCard).join('')}</ul>
@@ -1519,6 +1672,7 @@ function renderTournamentUI(options = {}) {
 
   const m = tournamentState.matches;
   const finals = m.final ? [m.final] : [];
+  const playoffCol = m.playoff?.length ? renderBracketColumn('playoff', m.playoff) : '';
   const revivalCol = m.revival?.length
     ? renderBracketColumn('revival', m.revival)
     : renderRevivalPendingColumn();
@@ -1530,6 +1684,7 @@ function renderTournamentUI(options = {}) {
     renderBracketSummary() +
     '<div class="bracket-board">' +
     renderBracketColumn('prelim', m.prelim) +
+    playoffCol +
     revivalCol +
     renderBracketColumn('quarter', m.quarter) +
     challengeCol +
@@ -1608,6 +1763,9 @@ function initTournament() {
   const sessionSelect = $('#session-select');
   loadSession(sessionSelect?.value || 'junior');
   initTournamentSync();
+  if (isTournamentDebug()) {
+    console.info('[tournament] debug mode on (?debug=1 or localStorage bex-tournament-debug=1)');
+  }
 
   sessionSelect?.addEventListener('change', () => {
     loadSession(sessionSelect.value);

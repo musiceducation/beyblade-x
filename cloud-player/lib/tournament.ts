@@ -7,6 +7,7 @@ import {
 
 export const PHASE_LIST = [
   'prelim',
+  'playoff',
   'revival',
   'quarter',
   'challenge',
@@ -27,6 +28,7 @@ export function getAllMatches(data: SessionData | null): Match[] {
   const prelim = Array.isArray(m.prelim) ? m.prelim : [];
   return [
     ...prelim,
+    ...((m.playoff as Match[]) || []),
     ...((m.quarter as Match[]) || []),
     ...((m.revival as Match[]) || []),
     ...(m.challenge ? [m.challenge as Match] : []),
