@@ -3968,6 +3968,7 @@ body.replay-theater-active .finish-announce {
 }
 
 .phase-prelim .bracket-column-head { border-left-color: var(--blue); }
+.phase-playoff .bracket-column-head { border-left-color: #7eb8ff; }
 .phase-quarter .bracket-column-head { border-left-color: #5ac8fa; }
 .phase-semi .bracket-column-head { border-left-color: var(--purple); }
 .phase-final .bracket-column-head { border-left-color: var(--gold); }
