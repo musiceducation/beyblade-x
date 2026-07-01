@@ -111,11 +111,11 @@ async function runEventChecklist() {
     hint: competitionOn ? '倒數優先、減少延遲' : '已關閉（不建議現場使用）',
   });
 
-  const pendingLan = typeof replayState !== 'undefined'
-    ? replayState.replays.filter((r) => r.videoId && r.serverSynced === false).length
+  const pendingLan = typeof replayState !== 'undefined' && typeof replayNeedsLanUpload === 'function'
+    ? replayState.replays.filter((r) => replayNeedsLanUpload(r)).length
     : 0;
-  const pendingCloud = typeof replayState !== 'undefined' && typeof isSupabaseSyncEnabled === 'function' && isSupabaseSyncEnabled()
-    ? replayState.replays.filter((r) => r.videoId && r.cloudSynced === false).length
+  const pendingCloud = typeof replayState !== 'undefined' && typeof replayNeedsCloudUpload === 'function'
+    ? replayState.replays.filter((r) => replayNeedsCloudUpload(r)).length
     : 0;
   const pending = pendingLan + pendingCloud;
   items.push({ label: '待上傳回放', ok: pending === 0, hint: pending ? `LAN ${pendingLan} · 雲 ${pendingCloud}` : '全部已同步' });
