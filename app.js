@@ -7,6 +7,7 @@ const LAUNCH_SEQUENCE = ['Three', 'Two', 'One', 'Go Shoot!'];
 
 const PHASE_LABELS = {
   prelim: '初賽',
+  playoff: '附加賽',
   revival: '復活賽',
   quarter: '複賽',
   challenge: '四強挑戰',
@@ -2020,24 +2021,6 @@ const PEER_CONFIG = {
   },
 };
 
-// #region agent log
-function dbgCam(hypothesisId, location, message, data = {}) {
-  fetch('http://127.0.0.1:7781/ingest/44c3a4a2-b31c-4d72-b415-659fb6f08241', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '76cc96' },
-    body: JSON.stringify({
-      sessionId: '76cc96',
-      hypothesisId,
-      location,
-      message,
-      data,
-      timestamp: Date.now(),
-      runId: 'pre-fix',
-    }),
-  }).catch(() => {});
-}
-// #endregion
-
 function hostPeerId(room) {
   return `bex-${String(room || '').trim().toUpperCase()}`;
 }
@@ -2211,14 +2194,6 @@ function resetRemoteInboundStream() {
 
 function mergeRemoteTrack(track) {
   if (!track) return;
-  // #region agent log
-  dbgCam('H1-H2', 'app.js:mergeRemoteTrack', 'ontrack received', {
-    kind: track.kind,
-    readyState: track.readyState,
-    muted: track.muted,
-    id: track.id,
-  });
-  // #endregion
   if (!remoteInboundStream) remoteInboundStream = new MediaStream();
   remoteInboundStream.getTracks()
     .filter((t) => t.kind === track.kind)
@@ -2231,20 +2206,8 @@ function attachRemoteStream(remoteStream) {
   if (!remoteStream) return;
   const videoTrack = remoteStream.getVideoTracks()[0];
   if (!videoTrack) {
-    // #region agent log
-    dbgCam('H2', 'app.js:attachRemoteStream', 'no video track', {
-      audioTracks: remoteStream.getAudioTracks().length,
-    });
-    // #endregion
     return;
   }
-
-  // #region agent log
-  dbgCam('H2-H4', 'app.js:attachRemoteStream', 'attaching stream', {
-    trackReady: videoTrack.readyState,
-    trackMuted: videoTrack.muted,
-  });
-  // #endregion
 
   if (state.cameraStream && state.cameraStream !== remoteStream && state.cameraStream.getTracks) {
     state.cameraStream.getTracks().forEach((t) => t.stop());
@@ -2255,14 +2218,6 @@ function attachRemoteStream(remoteStream) {
   applyMirror();
 
   const markFeedReady = () => {
-    // #region agent log
-    dbgCam('H4', 'app.js:markFeedReady', 'video element state', {
-      videoWidth: video.videoWidth,
-      videoHeight: video.videoHeight,
-      paused: video.paused,
-      readyState: video.readyState,
-    });
-    // #endregion
     if (!video.videoWidth) return;
     showCameraActive(true);
     setRemoteStatus('手機鏡頭已連線 ✓', true);
@@ -2282,9 +2237,6 @@ function attachRemoteStream(remoteStream) {
     const p = video.play();
     if (p && p.catch) {
       p.catch((err) => {
-        // #region agent log
-        dbgCam('H4', 'app.js:tryPlay', 'video.play failed', { error: String(err) });
-        // #endregion
         setTimeout(tryPlay, 300);
       });
     }
@@ -2382,14 +2334,6 @@ async function pollForPhoneOffer() {
   try {
     const offer = await signalRequest('offer');
     if (offer && offer.type === 'offer') {
-      // #region agent log
-      dbgCam('H3-H5', 'app.js:pollForPhoneOffer', 'offer polled', {
-        hasLiveVideo: hasLiveRemoteVideo(),
-        signalingState: state.cameraPeer?.signalingState,
-        connectionState: state.cameraPeer?.connectionState,
-        hasRemoteDesc: !!state.cameraPeer?.remoteDescription,
-      });
-      // #endregion
       if (hasLiveRemoteVideo()) {
         setRemoteStatus('手機鏡頭已連線 ✓', true);
       } else {
@@ -2398,12 +2342,6 @@ async function pollForPhoneOffer() {
         const answeredSameOffer = pc?.remoteDescription?.sdp === offerSdp;
 
         if (answeredSameOffer) {
-          // #region agent log
-          dbgCam('H5', 'app.js:pollForPhoneOffer', 'skip duplicate offer', {
-            connectionState: pc.connectionState,
-            iceState: pc.iceConnectionState,
-          });
-          // #endregion
           if (!hasLiveRemoteVideo()) {
             setRemoteStatus(
               pc.connectionState === 'connected' ? '已連線，等待畫面…' : '已回覆手機，等待畫面…',
@@ -2423,21 +2361,12 @@ async function pollForPhoneOffer() {
           await pc.setLocalDescription(answer);
           await waitForIceGathering(pc);
           await signalRequest('answer', pc.localDescription);
-          // #region agent log
-          dbgCam('H3', 'app.js:pollForPhoneOffer', 'answer sent', {
-            signalingState: pc.signalingState,
-            iceState: pc.iceConnectionState,
-          });
-          // #endregion
           setRemoteStatus('已回覆手機，等待畫面…', true);
         }
       }
     }
   } catch (err) {
     console.error(err);
-    // #region agent log
-    dbgCam('H3-H5', 'app.js:pollForPhoneOffer', 'poll error', { error: String(err) });
-    // #endregion
     setRemoteStatus('本機信令錯誤，正在重試…', false);
   }
 
@@ -2458,13 +2387,6 @@ function createHostPeerConnection() {
   };
 
   pc.onconnectionstatechange = () => {
-    // #region agent log
-    dbgCam('H1-H5', 'app.js:pc.connectionState', 'state change', {
-      connectionState: pc.connectionState,
-      iceState: pc.iceConnectionState,
-      hasLiveVideo: hasLiveRemoteVideo(),
-    });
-    // #endregion
     if (pc.connectionState === 'connected') {
       if (!hasLiveRemoteVideo()) setRemoteStatus('已連線，等待畫面…', true);
     } else if (pc.connectionState === 'failed') {
@@ -3172,6 +3094,11 @@ function init() {
     $('#victory-overlay').hidden = true;
     $('#btn-dismiss-victory').textContent = '繼續';
     if (typeof switchAppView === 'function') switchAppView('tournament');
+  });
+  $('#btn-victory-next-match')?.addEventListener('click', () => {
+    if (typeof loadRecommendedNextMatch === 'function') {
+      loadRecommendedNextMatch().catch(console.error);
+    }
   });
   $('#btn-victory-revert')?.addEventListener('click', () => {
     revertMatchEndingFinish();

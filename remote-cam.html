@@ -132,25 +132,6 @@
 
     document.getElementById('room-display').textContent = room || '—';
 
-    // #region agent log
-    function dbgPhone(hypothesisId, location, message, data) {
-      fetch('http://127.0.0.1:7781/ingest/44c3a4a2-b31c-4d72-b415-659fb6f08241', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '76cc96' },
-        body: JSON.stringify({
-          sessionId: '76cc96',
-          hypothesisId,
-          location,
-          message,
-          data,
-          timestamp: Date.now(),
-          runId: 'pre-fix',
-          side: 'phone',
-        }),
-      }).catch(() => {});
-    }
-    // #endregion
-
     function setStatus(msg, type) {
       statusEl.textContent = msg;
       statusEl.className = 'status' + (type ? ' ' + type : '');
@@ -245,13 +226,6 @@
       connected = true;
       starting = false;
       if (retryTimer) clearTimeout(retryTimer);
-      // #region agent log
-      dbgPhone('H1', 'remote-cam:onPhoneConnected', 'phone thinks connected', {
-        iceState: pc?.iceConnectionState,
-        connState: pc?.connectionState,
-        videoTracks: localStream?.getVideoTracks?.()?.length ?? 0,
-      });
-      // #endregion
       setStatus('已連線！', 'ok');
       connectedBadge.classList.add('show');
       preview.classList.remove('hidden-preview');
@@ -300,13 +274,6 @@
         const answer = await signalRequest('answer');
         if (answer && answer.type === 'answer') {
           await pc.setRemoteDescription(answer);
-          // #region agent log
-          dbgPhone('H3', 'remote-cam:waitForAnswer', 'answer received', {
-            attempt,
-            tries,
-            signalingState: pc.signalingState,
-          });
-          // #endregion
           setStatus('已收到主機回覆，正在建立畫面…', 'wait');
           return;
         }

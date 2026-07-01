@@ -2,7 +2,7 @@ const $ = (sel) => document.querySelector(sel);
 
 const SESSION_LABELS = { junior: '親子組', senior: '公開組' };
 const PHASE_LABELS = {
-  prelim: '初賽', revival: '復活賽', quarter: '複賽',
+  prelim: '初賽', playoff: '附加賽', revival: '復活賽', quarter: '複賽',
   challenge: '四強挑戰', semi: '準決賽', final: '決賽',
 };
 

@@ -5,6 +5,7 @@ function getAllMatches(data) {
   if (!m?.prelim) return [];
   return [
     ...m.prelim,
+    ...(m.playoff || []),
     ...(m.quarter || []),
     ...(m.revival || []),
     ...(m.challenge ? [m.challenge] : []),
@@ -13,7 +14,7 @@ function getAllMatches(data) {
   ];
 }
 
-const PHASE_ORDER_SHARED = { prelim: 0, revival: 1, quarter: 2, challenge: 3, semi: 4, final: 5 };
+const PHASE_ORDER_SHARED = { prelim: 0, playoff: 1, revival: 2, quarter: 3, challenge: 4, semi: 5, final: 6 };
 
 function getReadyMatches(data) {
   return getAllMatches(data)

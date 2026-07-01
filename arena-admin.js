@@ -111,6 +111,15 @@ async function runEventChecklist() {
     hint: competitionOn ? '倒數優先、減少延遲' : '已關閉（不建議現場使用）',
   });
 
+  const backupHint = typeof formatAutoBackupHint === 'function'
+    ? formatAutoBackupHint()
+    : (localStorage.getItem('bex-last-auto-backup') ? '已啟用' : '每 15 分鐘');
+  items.push({
+    label: '自動備份',
+    ok: true,
+    hint: `每 15 分鐘 · 上次 ${backupHint}`,
+  });
+
   const pendingLan = typeof replayState !== 'undefined'
     ? replayState.replays.filter((r) => r.videoId && r.serverSynced === false).length
     : 0;

@@ -71,6 +71,7 @@
       </select>
       <select id="phase-select" class="session-select" aria-label="比賽階段">
         <option value="prelim">初賽</option>
+        <option value="playoff">附加賽</option>
         <option value="revival">復活賽</option>
         <option value="quarter">複賽</option>
         <option value="challenge">四強挑戰</option>
@@ -263,7 +264,7 @@
       <div class="tournament-body">
         <div class="roster-panel">
           <div class="roster-toolbar">
-            <span id="roster-count" class="roster-count">0 / 16</span>
+            <span id="roster-count" class="roster-count">0 人</span>
             <div class="roster-add-row">
               <input id="new-player-name" type="text" placeholder="選手姓名" maxlength="16">
               <button id="btn-add-player" class="btn btn-sm btn-primary" type="button">加入</button>
@@ -456,7 +457,8 @@
         <h2 id="victory-name">Blader 1</h2>
         <p id="victory-detail" class="victory-detail">對戰完成</p>
         <div class="victory-actions">
-          <button id="btn-dismiss-victory" class="btn btn-primary">繼續</button>
+          <button id="btn-victory-next-match" class="btn btn-primary btn-victory-next" type="button" hidden>▶ 開始下一場</button>
+          <button id="btn-dismiss-victory" class="btn btn-ghost">繼續</button>
           <button id="btn-victory-revert" class="btn btn-ghost" type="button" hidden>↩ 撤銷完場</button>
           <button id="btn-victory-bracket" class="btn btn-ghost" type="button" hidden>查看完整賽程</button>
         </div>

@@ -1,5 +1,6 @@
 export const PHASE_LABELS: Record<string, string> = {
   prelim: '初賽',
+  playoff: '附加賽',
   revival: '復活賽',
   quarter: '複賽',
   challenge: '四強挑戰',
@@ -9,11 +10,12 @@ export const PHASE_LABELS: Record<string, string> = {
 
 export const PHASE_ORDER: Record<string, number> = {
   prelim: 0,
-  revival: 1,
-  quarter: 2,
-  challenge: 3,
-  semi: 4,
-  final: 5,
+  playoff: 1,
+  revival: 2,
+  quarter: 3,
+  challenge: 4,
+  semi: 5,
+  final: 6,
 };
 
 export const SESSION_LABELS: Record<string, string> = {

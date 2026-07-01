@@ -6,6 +6,7 @@ const $ = (sel) => document.querySelector(sel);
 
 const PHASE_LABELS = {
   prelim: '初賽',
+  playoff: '附加賽',
   revival: '復活賽',
   quarter: '複賽',
   challenge: '四強挑戰',
@@ -13,7 +14,7 @@ const PHASE_LABELS = {
   final: '決賽',
 };
 
-const PHASE_ORDER = { prelim: 0, revival: 1, quarter: 2, challenge: 3, semi: 4, final: 5 };
+const PHASE_ORDER = { prelim: 0, playoff: 1, revival: 2, quarter: 3, challenge: 4, semi: 5, final: 6 };
 
 const SESSION_LABELS = {
   junior: '第一場 親子組',
