@@ -3095,6 +3095,11 @@ function init() {
     $('#btn-dismiss-victory').textContent = '繼續';
     if (typeof switchAppView === 'function') switchAppView('tournament');
   });
+  $('#btn-victory-next-match')?.addEventListener('click', () => {
+    if (typeof loadRecommendedNextMatch === 'function') {
+      loadRecommendedNextMatch().catch(console.error);
+    }
+  });
   $('#btn-victory-revert')?.addEventListener('click', () => {
     revertMatchEndingFinish();
   });

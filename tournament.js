@@ -4,6 +4,7 @@
 
 const QUARTER_ENTRANTS = 8;
 const REVIVAL_FINAL_LABEL = '逆轉小羊決賽';
+const AUTO_BACKUP_MS = 15 * 60 * 1000;
 const STORAGE_KEY = 'beyblade-tournament-v1';
 const SYNC_POLL_MS = 1500;
 const LIVE_SYNC_DEBOUNCE_MS = 200;
@@ -25,6 +26,8 @@ const tournamentSync = {
   pendingConflict: null,
   pollTimer: null,
   liveSyncTimer: null,
+  autoBackupTimer: null,
+  lastAutoBackupAt: 0,
 };
 
 const tournamentState = {
@@ -253,6 +256,46 @@ function backupTournamentJson() {
     `beyblade-backup-${Date.now()}.json`,
     new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }),
   );
+  return payload.exportedAt;
+}
+
+function tournamentHasBackupData() {
+  const all = loadTournamentStorage();
+  return ['junior', 'senior'].some((session) => sessionHasData(all[session]));
+}
+
+function runAutoBackup(options = {}) {
+  const { silent = false, force = false } = options;
+  if (!force && !tournamentHasBackupData()) return null;
+
+  const exportedAt = backupTournamentJson();
+  tournamentSync.lastAutoBackupAt = Date.now();
+  try {
+    localStorage.setItem('bex-last-auto-backup', String(tournamentSync.lastAutoBackupAt));
+  } catch { /* ignore */ }
+
+  if (!silent && typeof showToast === 'function') {
+    const time = new Date(tournamentSync.lastAutoBackupAt).toLocaleTimeString('zh-Hant', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    showToast(`已自動備份賽程（${time}）`);
+  }
+  tournamentDebug('auto backup', { exportedAt, silent });
+  return exportedAt;
+}
+
+function formatAutoBackupHint() {
+  const ts = tournamentSync.lastAutoBackupAt
+    || parseInt(localStorage.getItem('bex-last-auto-backup') || '0', 10);
+  if (!ts) return '尚未備份';
+  return new Date(ts).toLocaleTimeString('zh-Hant', { hour: '2-digit', minute: '2-digit' });
+}
+
+function startAutoBackupTimer() {
+  if (tournamentSync.autoBackupTimer) clearInterval(tournamentSync.autoBackupTimer);
+  tournamentSync.lastAutoBackupAt = parseInt(localStorage.getItem('bex-last-auto-backup') || '0', 10) || 0;
+  tournamentSync.autoBackupTimer = setInterval(() => runAutoBackup(), AUTO_BACKUP_MS);
 }
 
 async function restoreTournamentJson(file) {
@@ -791,8 +834,10 @@ function hideVictorySchedulePanel() {
   const overlay = $('#victory-overlay');
   const panel = $('#victory-schedule-panel');
   const bracketBtn = $('#btn-victory-bracket');
+  const nextBtn = $('#btn-victory-next-match');
   if (panel) panel.hidden = true;
   if (bracketBtn) bracketBtn.hidden = true;
+  if (nextBtn) nextBtn.hidden = true;
   if (overlay) overlay.classList.remove('victory-overlay--tournament');
 }
 
@@ -860,6 +905,7 @@ function renderVictorySchedulePanel() {
       loadMatchToScoreboard(btn.dataset.matchId);
     });
   });
+  updateVictoryNextMatchButton();
 }
 
 function showVictoryScheduleAfterMatch() {
@@ -869,11 +915,44 @@ function showVictoryScheduleAfterMatch() {
   renderVictorySchedulePanel();
   const dismissBtn = $('#btn-dismiss-victory');
   if (dismissBtn) dismissBtn.textContent = readyMatchesLabel();
+  updateVictoryNextMatchButton();
 }
 
 function readyMatchesLabel() {
   const n = getReadyMatches().length;
   return n > 0 ? `稍後再選（${n} 場可開賽）` : '查看完整賽程';
+}
+
+function getRecommendedNextMatch() {
+  const ready = getReadyMatches();
+  return ready.length ? ready[0] : null;
+}
+
+function formatNextMatchLabel(match) {
+  if (!match) return '';
+  return `${match.label} — ${playerName(match.p1Id)} vs ${playerName(match.p2Id)}`;
+}
+
+function updateVictoryNextMatchButton() {
+  const btn = $('#btn-victory-next-match');
+  if (!btn) return;
+  const next = getRecommendedNextMatch();
+  if (!next) {
+    btn.hidden = true;
+    return;
+  }
+  btn.hidden = false;
+  btn.textContent = `▶ 開始下一場：${formatNextMatchLabel(next)}`;
+}
+
+async function loadRecommendedNextMatch() {
+  const next = getRecommendedNextMatch();
+  if (!next) return false;
+  hideVictorySchedulePanel();
+  $('#victory-overlay').hidden = true;
+  $('#btn-dismiss-victory').textContent = '繼續';
+  await loadMatchToScoreboard(next.id);
+  return true;
 }
 
 function findMatch(id) {
@@ -1763,6 +1842,7 @@ function initTournament() {
   const sessionSelect = $('#session-select');
   loadSession(sessionSelect?.value || 'junior');
   initTournamentSync();
+  startAutoBackupTimer();
   if (isTournamentDebug()) {
     console.info('[tournament] debug mode on (?debug=1 or localStorage bex-tournament-debug=1)');
   }
@@ -1793,7 +1873,14 @@ function initTournament() {
 
   $('#btn-draw')?.addEventListener('click', runDraw);
   $('#btn-export-csv')?.addEventListener('click', exportTournamentCsv);
-  $('#btn-backup-tournament')?.addEventListener('click', backupTournamentJson);
+  $('#btn-backup-tournament')?.addEventListener('click', () => {
+    backupTournamentJson();
+    tournamentSync.lastAutoBackupAt = Date.now();
+    try {
+      localStorage.setItem('bex-last-auto-backup', String(tournamentSync.lastAutoBackupAt));
+    } catch { /* ignore */ }
+    if (typeof showToast === 'function') showToast('已下載賽程備份');
+  });
   $('#btn-print-bracket')?.addEventListener('click', exportPrintableBracket);
   $('#btn-export-stats')?.addEventListener('click', exportStatsReport);
   $('#btn-export-awards')?.addEventListener('click', exportAwardsList);

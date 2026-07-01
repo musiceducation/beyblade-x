@@ -794,7 +794,7 @@ body.launch-active.launch-live .scoreboard {
   --hud-name-top: max(2.7rem, calc(env(safe-area-inset-top) + 2.2rem));
   --hud-score-top: max(7.4rem, calc(env(safe-area-inset-top) + 6.65rem));
   --hud-rail-top: max(13rem, calc(env(safe-area-inset-top) + 12rem));
-  --hud-rail-bottom: max(6.85rem, calc(env(safe-area-inset-bottom) + 5.85rem));
+  --hud-rail-bottom: max(11.5rem, calc(env(safe-area-inset-bottom) + 10.5rem));
   --hud-btn-bottom: max(0.85rem, env(safe-area-inset-bottom));
 }
 
@@ -1231,51 +1231,78 @@ body.launch-active.launch-live .score-label::after {
 body.launch-active.launch-live .finish-buttons {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 0.35rem;
+  gap: 0.4rem;
   position: fixed;
-  bottom: var(--hud-btn-bottom);
-  width: var(--hud-panel-w);
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+  width: min(94vw, 720px);
   margin: 0;
-  padding: 0.5rem;
-  background: rgba(6, 10, 18, 0.82);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 14px;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+  padding: 0.55rem 0.65rem 0.5rem;
+  background: rgba(6, 10, 18, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 16px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
   z-index: 956;
   pointer-events: auto;
 }
 
 body.launch-active.launch-live .player-red .finish-buttons {
-  left: var(--hud-inset-l);
+  bottom: calc(var(--hud-btn-bottom) + 4.75rem);
+  border-color: rgba(255, 45, 85, 0.35);
 }
 
 body.launch-active.launch-live .player-blue .finish-buttons {
-  right: var(--hud-inset-r);
-  left: auto;
+  bottom: var(--hud-btn-bottom);
+  border-color: rgba(0, 212, 255, 0.35);
+}
+
+body.launch-active.launch-live .player-red .finish-buttons::before,
+body.launch-active.launch-live .player-blue .finish-buttons::before {
+  display: block;
+  grid-column: 1 / -1;
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 0.15rem;
+  opacity: 0.9;
+}
+
+body.launch-active.launch-live .player-red .finish-buttons::before {
+  content: '紅方得分';
+  color: var(--red);
+}
+
+body.launch-active.launch-live .player-blue .finish-buttons::before {
+  content: '藍方得分';
+  color: var(--blue);
 }
 
 body.launch-active.launch-live .btn-finish {
   flex-direction: column;
   justify-content: center;
-  gap: 0.12rem;
-  padding: 0.42rem 0.22rem;
-  font-size: 0.62rem;
-  border-radius: 8px;
-  min-height: 54px;
+  gap: 0.15rem;
+  padding: 0.5rem 0.3rem;
+  font-size: 0.68rem;
+  border-radius: 10px;
+  min-height: 62px;
 }
 
 body.launch-active.launch-live .finish-name {
-  display: none;
+  display: block;
+  font-size: 0.62rem;
+  opacity: 0.85;
 }
 
 body.launch-active.launch-live .finish-icon {
-  font-size: 1.15rem;
+  font-size: 1.35rem;
 }
 
 body.launch-active.launch-live .btn-finish strong {
-  font-size: 0.8rem;
+  font-size: 0.92rem;
   margin-left: 0;
 }
 
@@ -3160,6 +3187,15 @@ body.replay-theater-active .arena-header {
   width: 100%;
 }
 
+.btn-victory-next {
+  width: 100%;
+  text-align: left;
+  white-space: normal;
+  line-height: 1.35;
+  padding: 0.85rem 1rem;
+  font-size: 0.95rem;
+}
+
 .victory-schedule-panel {
   flex: 1;
   min-width: 0;
@@ -4460,15 +4496,19 @@ body.replay-theater-active .finish-announce {
   }
 
   body.launch-active.launch-live .finish-buttons {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 0.25rem;
-    width: 100%;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.3rem;
+    width: min(96vw, 720px);
+  }
+
+  body.launch-active.launch-live .player-red .finish-buttons {
+    bottom: calc(var(--hud-btn-bottom) + 4.35rem);
   }
 
   body.launch-active.launch-live .btn-finish {
-    min-height: 44px;
-    padding: 0.35rem 0.25rem;
-    font-size: 0.7rem;
+    min-height: 56px;
+    padding: 0.4rem 0.2rem;
+    font-size: 0.65rem;
   }
 
   body.launch-active.launch-live .finish-icon {
@@ -4576,7 +4616,7 @@ body.replay-theater-active .finish-announce {
     --hud-name-top: max(2.15rem, calc(env(safe-area-inset-top) + 1.75rem));
     --hud-score-top: max(4.85rem, calc(env(safe-area-inset-top) + 4.2rem));
     --hud-rail-top: max(8.25rem, calc(env(safe-area-inset-top) + 7.5rem));
-    --hud-rail-bottom: max(4.85rem, calc(env(safe-area-inset-bottom) + 4rem));
+    --hud-rail-bottom: max(9rem, calc(env(safe-area-inset-bottom) + 8rem));
     --hud-btn-bottom: max(0.45rem, env(safe-area-inset-bottom));
     --hud-panel-w: calc((100vw - 5.5rem - env(safe-area-inset-left) - env(safe-area-inset-right)) / 2);
     --hud-inset-l: max(2.85rem, calc(env(safe-area-inset-left) + 2.35rem));
@@ -4643,15 +4683,19 @@ body.replay-theater-active .finish-announce {
   }
 
   body.launch-active.launch-live .finish-buttons {
-    width: var(--hud-panel-w);
-    padding: 0.28rem;
-    gap: 0.12rem;
+    width: min(94vw, 640px);
+    padding: 0.35rem 0.45rem;
+    gap: 0.2rem;
+  }
+
+  body.launch-active.launch-live .player-red .finish-buttons {
+    bottom: calc(var(--hud-btn-bottom) + 3.5rem);
   }
 
   body.launch-active.launch-live .btn-finish {
-    min-height: 36px;
-    padding: 0.18rem 0.08rem;
-    font-size: 0.48rem;
+    min-height: 44px;
+    padding: 0.22rem 0.12rem;
+    font-size: 0.52rem;
   }
 
   body.launch-active.launch-live .btn-finish strong {
