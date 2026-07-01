@@ -683,19 +683,26 @@ let launchTimers = [];
 let launchPlaying = false;
 
 const goShootAudio = $('#go-shoot-audio');
-// Timings from 321goshoot.m4a (~7.38s, silence-detected)
+const arenaBgm = $('#arena-bgm');
+let bgmPausedForCountdown = false;
+let bgmPlaySeq = 0;
+// Waveform-measured from 321goshoot.m4a (7.34s): Three → Two → One → Go Shoot!
 const GO_SHOOT_SYNC = [
-  { at: 0.34, label: 'Three' },
-  { at: 1.42, label: 'Two' },
+  { at: 0.60, label: 'Three' },
+  { at: 1.48, label: 'Two' },
   { at: 2.32, label: 'One' },
-  { at: 4.0, label: 'Go Shoot!', fx: true },
+  { at: 3.33, label: 'Go Shoot!', fx: true, end: 4.37 },
 ];
 const GO_SHOOT_DURATION = 7.384;
+const GO_SHOOT_VOLUME_GAIN = 3;
 const LAUNCH_ZOOM_MS = 200;
 const PARTICLE_CAP = 160;
 const COMPETITION_MODE_KEY = 'bex-competition-mode';
 const LOW_FX_MODE_KEY = 'bex-low-fx-mode';
 const REPLAY_BITRATE_KEY = 'bex-replay-bitrate';
+const BGM_ENABLED_KEY = 'bex-bgm-enabled';
+const BGM_VOLUME_KEY = 'bex-bgm-volume';
+const DEFAULT_BGM_VOLUME = 0.35;
 let launchRaf = null;
 let launchStep = -1;
 let goShootFxFired = false;
@@ -795,6 +802,79 @@ function setReplayBitrate(bps) {
   localStorage.setItem(REPLAY_BITRATE_KEY, String(Math.max(800000, Math.min(6000000, bps))));
 }
 
+function isBgmEnabled() {
+  return localStorage.getItem(BGM_ENABLED_KEY) !== '0';
+}
+
+function getBgmVolume() {
+  const v = parseFloat(localStorage.getItem(BGM_VOLUME_KEY));
+  if (Number.isFinite(v) && v >= 0 && v <= 1) return v;
+  return DEFAULT_BGM_VOLUME;
+}
+
+function syncBgmToggleUI() {
+  const on = isBgmEnabled();
+  ['#arena-bgm-toggle', '#arena-bgm-quick'].forEach((sel) => {
+    const el = $(sel);
+    if (el) el.checked = on;
+  });
+  const vol = getBgmVolume();
+  const slider = $('#arena-bgm-volume');
+  if (slider) slider.value = String(Math.round(vol * 100));
+  const label = $('#arena-bgm-volume-label');
+  if (label) label.textContent = `${Math.round(vol * 100)}%`;
+}
+
+function setBgmEnabled(on) {
+  localStorage.setItem(BGM_ENABLED_KEY, on ? '1' : '0');
+  syncBgmToggleUI();
+  if (!on) {
+    bgmPausedForCountdown = false;
+    stopArenaBgm();
+  } else {
+    tryPlayArenaBgm();
+  }
+}
+
+function setBgmVolume(vol) {
+  const v = Math.max(0, Math.min(1, vol));
+  localStorage.setItem(BGM_VOLUME_KEY, String(v));
+  if (arenaBgm) arenaBgm.volume = v;
+  syncBgmToggleUI();
+}
+
+function tryPlayArenaBgm() {
+  if (!arenaBgm || !isBgmEnabled() || bgmPausedForCountdown) return;
+  const seq = ++bgmPlaySeq;
+  arenaBgm.volume = getBgmVolume();
+  const p = arenaBgm.play();
+  if (p) {
+    p.then(() => {
+      if (seq !== bgmPlaySeq || bgmPausedForCountdown) {
+        arenaBgm.pause();
+      }
+    }).catch(() => {});
+  }
+}
+
+function stopArenaBgm() {
+  if (!arenaBgm) return;
+  arenaBgm.pause();
+}
+
+function pauseBgmForCountdown() {
+  if (!arenaBgm || !isBgmEnabled()) return;
+  bgmPlaySeq += 1;
+  bgmPausedForCountdown = true;
+  arenaBgm.pause();
+}
+
+function resumeBgmAfterCountdown() {
+  if (!bgmPausedForCountdown) return;
+  bgmPausedForCountdown = false;
+  tryPlayArenaBgm();
+}
+
 function isLaunchCritical() {
   return launchPlaying
     || launchStandbyActive
@@ -815,20 +895,21 @@ async function warmCompetitionAssets() {
   if (audioCtx?.state === 'suspended') {
     try { await audioCtx.resume(); } catch (_) { /* ignore */ }
   }
+  initGoShootAudioGain();
   if (!goShootAudio) return false;
   const ready = await ensureGoShootAudioReady();
   if (!ready || goShootAudio.readyState < 2) return false;
   try {
-    const volume = goShootAudio.volume;
-    goShootAudio.volume = 0;
+    setGoShootAudioMuted(true);
     goShootAudio.currentTime = 0;
     const p = goShootAudio.play();
     if (p) await p;
     goShootAudio.pause();
     goShootAudio.currentTime = 0;
-    goShootAudio.volume = volume;
+    setGoShootAudioMuted(false);
     return true;
   } catch (_) {
+    setGoShootAudioMuted(false);
     return goShootAudio.readyState >= 2;
   }
 }
@@ -912,7 +993,8 @@ async function enterCameraStandbyMode() {
   const relaunch = $('#btn-relaunch');
   if (relaunch) relaunch.hidden = true;
 
-  warmCompetitionAssets().catch(() => {});
+  tryPlayArenaBgm();
+  setTimeout(() => warmCompetitionAssets().catch(() => {}), 200);
 }
 
 async function runLaunchCountdownSequence() {
@@ -936,6 +1018,7 @@ async function runLaunchCountdownSequence() {
   document.body.classList.remove('launch-standby');
   setScoringLocked(true);
   showLiveReplayButton();
+  pauseBgmForCountdown();
 
   if ($('#voice-countdown').checked && goShootAudio) {
     startLaunchCountdownAudio();
@@ -1084,8 +1167,19 @@ function enterCameraLaunchMode() {
 let launchOverlayHideTimer = null;
 let goShootTextHideTimer = null;
 
-const GO_SHOOT_TEXT_VISIBLE_MS = 780;
 const GO_SHOOT_TEXT_BURST_MS = 420;
+
+function isVoiceCountdownActive() {
+  return Boolean($('#voice-countdown')?.checked && goShootAudio);
+}
+
+function getGoShootTextVisibleMs() {
+  const step = GO_SHOOT_SYNC.find((s) => s.label === 'Go Shoot!');
+  if (step?.end && step.end > step.at) {
+    return Math.round((step.end - step.at) * 1000) - 60;
+  }
+  return 900;
+}
 
 let burstRingTimers = [];
 let impactBurstTimer = null;
@@ -1202,6 +1296,7 @@ function stopLaunchPlayback() {
       goShootAudio.currentTime = 0;
       goShootAudio.onended = null;
     }
+    resumeBgmAfterCountdown();
   }
   const el = $('#launch-timer');
   el.hidden = true;
@@ -1253,7 +1348,7 @@ function scheduleGoShootTextHide() {
       setTimeout(clearLaunchOverlayText, GO_SHOOT_TEXT_BURST_MS);
     }
     goShootTextHideTimer = null;
-  }, GO_SHOOT_TEXT_VISIBLE_MS);
+  }, getGoShootTextVisibleMs());
 }
 
 function triggerAnimeImpact(stepIndex) {
@@ -1360,7 +1455,9 @@ function triggerCountdownStepEffect(label, stepIndex) {
     spawnParticles(scaledFxCount(18), '#ffffff', 'extreme');
     spawnStreakBurst(scaledFxCount(20), color);
   }
-  playBeep(440 + stepIndex * 110, 0.1 + stepIndex * 0.05);
+  if (!isVoiceCountdownActive()) {
+    playBeep(440 + stepIndex * 110, 0.1 + stepIndex * 0.05);
+  }
 }
 
 function stopGoShootAudio() {
@@ -1368,12 +1465,20 @@ function stopGoShootAudio() {
 }
 
 function getScaledSync() {
-  const duration = goShootAudio.duration;
+  const duration = goShootAudio?.duration;
   if (!duration || Number.isNaN(duration)) {
-    return GO_SHOOT_SYNC.map((s) => ({ ...s, at: s.at }));
+    return GO_SHOOT_SYNC.map((s) => ({ ...s }));
+  }
+  const drift = Math.abs(duration - GO_SHOOT_DURATION) / GO_SHOOT_DURATION;
+  if (drift < 0.02) {
+    return GO_SHOOT_SYNC.map((s) => ({ ...s }));
   }
   const scale = duration / GO_SHOOT_DURATION;
-  return GO_SHOOT_SYNC.map((s) => ({ ...s, at: s.at * scale }));
+  return GO_SHOOT_SYNC.map((s) => ({
+    ...s,
+    at: s.at * scale,
+    end: s.end ? s.end * scale : undefined,
+  }));
 }
 
 function syncLaunchVisuals() {
@@ -1383,7 +1488,7 @@ function syncLaunchVisuals() {
   const steps = getScaledSync();
 
   for (let i = launchStep + 1; i < steps.length; i++) {
-    if (t < steps[i].at - 0.008) break;
+    if (t < steps[i].at - 0.02) break;
     launchStep = i;
     showLaunchOverlayText(steps[i].label, i);
     if (steps[i].fx) goShootFxFired = true;
@@ -1439,13 +1544,14 @@ function finishLaunchCountdown() {
   if (badge) badge.setAttribute('data-hint', isTouchDevice() ? '點右上角返回賽程' : 'Esc 返回賽程');
   showExitLaunchButton();
   updateRelaunchButton();
+  resumeBgmAfterCountdown();
 }
 
 function triggerGoShootMoment() {
   document.body.classList.add('go-shoot-moment');
   triggerAnimeImpact(3);
 
-  shakeScreen('go-shoot', 1000);
+  shakeScreen('go-shoot', 1100);
 
   flashScreen('anime-impact', 180, 1);
   flashScreen('go-shoot-flash', 320, 0.95);
@@ -1467,15 +1573,17 @@ function triggerGoShootMoment() {
   const overlay = $('#launch-camera-overlay');
   if (overlay) {
     overlay.classList.add('shockwave');
-    setTimeout(() => overlay.classList.remove('shockwave'), 950);
+    setTimeout(() => overlay.classList.remove('shockwave'), 1100);
   }
 
   pulseCamera();
-  playBeep(880, 0.35);
-  setTimeout(() => playBeep(1100, 0.25), 80);
-  setTimeout(() => playBeep(660, 0.2), 200);
+  if (!isVoiceCountdownActive()) {
+    playBeep(880, 0.35);
+    setTimeout(() => playBeep(1100, 0.25), 80);
+    setTimeout(() => playBeep(660, 0.2), 200);
+  }
 
-  setTimeout(() => document.body.classList.remove('go-shoot-moment'), 1100);
+  setTimeout(() => document.body.classList.remove('go-shoot-moment'), 1200);
 }
 
 function resetLaunchTimer(exitFullscreen = true) {
@@ -1490,24 +1598,28 @@ function resetLaunchTimer(exitFullscreen = true) {
 }
 
 async function startLaunchCountdownFallback() {
-  const el = $('#launch-timer');
-  let step = 0;
+  launchPlaying = true;
+  launchStep = -1;
+  goShootFxFired = false;
+  const steps = getScaledSync();
+  const timers = [];
 
-  function showStep() {
-    const label = LAUNCH_SEQUENCE[step];
-    showLaunchOverlayText(label, step);
+  steps.forEach((step, i) => {
+    timers.push(setTimeout(() => {
+      launchStep = i;
+      showLaunchOverlayText(step.label, i);
+      if (step.fx) goShootFxFired = true;
+    }, Math.round(step.at * 1000)));
+  });
 
-    step++;
-    if (step >= LAUNCH_SEQUENCE.length) {
-      clearInterval(fallbackInterval);
-      setTimeout(finishLaunchCountdown, 900);
-    }
-  }
+  const last = steps[steps.length - 1];
+  const finishAt = Math.round(((last.end || last.at + 1.2) + 0.35) * 1000);
+  timers.push(setTimeout(() => {
+    launchPlaying = false;
+    finishLaunchCountdown();
+  }, finishAt));
 
-  let fallbackInterval;
-  showStep();
-  fallbackInterval = setInterval(showStep, 900);
-  launchTimers = [fallbackInterval];
+  launchTimers = timers;
 }
 
 async function ensureGoShootAudioReady() {
@@ -1533,6 +1645,8 @@ async function ensureGoShootAudioReady() {
 }
 
 async function startLaunchCountdownAudio() {
+  resumeAudioCtx();
+  initGoShootAudioGain();
   goShootAudio.currentTime = 0;
   launchPlaying = true;
   launchStep = -1;
@@ -1593,71 +1707,139 @@ function getSessionLabel() {
 // ─── Visual & audio effects ────────────────────────────────
 
 const audioCtx = typeof AudioContext !== 'undefined' ? new (window.AudioContext || window.webkitAudioContext)() : null;
+let goShootSourceNode = null;
+let goShootGainNode = null;
+
+function initGoShootAudioGain() {
+  if (!audioCtx || !goShootAudio || goShootSourceNode) return;
+  try {
+    goShootSourceNode = audioCtx.createMediaElementSource(goShootAudio);
+    goShootGainNode = audioCtx.createGain();
+    goShootGainNode.gain.value = GO_SHOOT_VOLUME_GAIN;
+    goShootSourceNode.connect(goShootGainNode);
+    goShootGainNode.connect(audioCtx.destination);
+  } catch (_) {
+    goShootAudio.volume = 1;
+  }
+}
+
+function setGoShootAudioMuted(muted) {
+  if (goShootGainNode) {
+    goShootGainNode.gain.value = muted ? 0 : GO_SHOOT_VOLUME_GAIN;
+  } else if (goShootAudio) {
+    goShootAudio.volume = muted ? 0 : Math.min(1, GO_SHOOT_VOLUME_GAIN);
+  }
+}
+
+function resumeAudioCtx() {
+  if (!audioCtx) return false;
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return true;
+}
 
 function playBeep(freq, duration) {
-  if (!audioCtx) return;
-  if (audioCtx.state === 'suspended') audioCtx.resume();
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  osc.connect(gain);
-  gain.connect(audioCtx.destination);
-  osc.frequency.value = freq;
-  osc.type = 'square';
-  gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
-  osc.start(audioCtx.currentTime);
-  osc.stop(audioCtx.currentTime + duration);
+  if (!resumeAudioCtx()) return;
+  playTone({ freq, duration, volume: 0.07, type: 'sine', attack: 0.006, release: duration * 0.85 });
 }
 
-function playFinishImpact(type) {
-  if (!audioCtx) return;
-  if (audioCtx.state === 'suspended') audioCtx.resume();
-
-  const now = audioCtx.currentTime;
-  const gain = audioCtx.createGain();
+function playTone({
+  freq,
+  duration = 0.15,
+  type = 'sine',
+  volume = 0.1,
+  attack = 0.008,
+  release,
+  delay = 0,
+  detune = 0,
+  freqEnd,
+  filterFreq,
+}) {
+  if (!resumeAudioCtx()) return;
+  const now = audioCtx.currentTime + delay;
+  const tail = release ?? Math.max(0.04, duration * 0.72);
   const osc = audioCtx.createOscillator();
-  const punchFreq = {
-    spin: 520,
-    burst: 95,
-    over: 220,
-    extreme: 70,
-  }[type] || 180;
-
-  osc.type = type === 'spin' ? 'sawtooth' : 'square';
-  osc.frequency.setValueAtTime(punchFreq * 1.8, now);
-  osc.frequency.exponentialRampToValueAtTime(punchFreq, now + 0.16);
-  gain.gain.setValueAtTime(type === 'extreme' ? 0.18 : 0.14, now);
-  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
-  osc.connect(gain);
-  gain.connect(audioCtx.destination);
-  osc.start(now);
-  osc.stop(now + 0.45);
-
-  const noiseBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.18, audioCtx.sampleRate);
-  const data = noiseBuffer.getChannelData(0);
-  for (let i = 0; i < data.length; i++) {
-    data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, now);
+  if (freqEnd) {
+    osc.frequency.exponentialRampToValueAtTime(Math.max(freqEnd, 36), now + duration);
   }
-  const noise = audioCtx.createBufferSource();
-  const noiseGain = audioCtx.createGain();
-  noise.buffer = noiseBuffer;
-  noiseGain.gain.setValueAtTime(type === 'spin' ? 0.04 : 0.1, now);
-  noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
-  noise.connect(noiseGain);
-  noiseGain.connect(audioCtx.destination);
-  noise.start(now);
+  if (detune) osc.detune.setValueAtTime(detune, now);
+
+  let output = osc;
+  if (filterFreq) {
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(filterFreq, now);
+    filter.Q.setValueAtTime(0.7, now);
+    osc.connect(filter);
+    output = filter;
+  }
+  output.connect(gain);
+  gain.connect(audioCtx.destination);
+
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.linearRampToValueAtTime(volume, now + attack);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + tail);
+  osc.start(now);
+  osc.stop(now + tail + 0.04);
 }
 
-function speakFinishTerm(type) {
-  const f = FINISH_LABELS[type];
-  if (!f || !('speechSynthesis' in window)) return;
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(f.en);
-  utterance.lang = 'en-US';
-  utterance.rate = 0.88;
-  utterance.pitch = type === 'extreme' ? 0.72 : 0.82;
-  utterance.volume = 1;
-  setTimeout(() => window.speechSynthesis.speak(utterance), 120);
+function playSoftNoise(duration, volume, delay = 0, filterFreq = 2400) {
+  if (!resumeAudioCtx()) return;
+  const now = audioCtx.currentTime + delay;
+  const buffer = audioCtx.createBuffer(1, Math.ceil(audioCtx.sampleRate * duration), audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) {
+    const fade = 1 - i / data.length;
+    data[i] = (Math.random() * 2 - 1) * fade * fade;
+  }
+  const source = audioCtx.createBufferSource();
+  const filter = audioCtx.createBiquadFilter();
+  const gain = audioCtx.createGain();
+  source.buffer = buffer;
+  filter.type = 'bandpass';
+  filter.frequency.setValueAtTime(filterFreq, now);
+  filter.Q.setValueAtTime(0.9, now);
+  source.connect(filter);
+  filter.connect(gain);
+  gain.connect(audioCtx.destination);
+  gain.gain.setValueAtTime(volume, now);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+  source.start(now);
+  source.stop(now + duration + 0.02);
+}
+
+function playFinishStinger(type) {
+  if (!resumeAudioCtx()) return;
+
+  switch (type) {
+    case 'spin':
+      playTone({ freq: 880, freqEnd: 587, duration: 0.34, volume: 0.08, type: 'sine' });
+      playTone({ freq: 587, duration: 0.22, volume: 0.05, delay: 0.1, type: 'triangle', filterFreq: 1800 });
+      break;
+    case 'burst':
+      playSoftNoise(0.07, 0.05, 0, 900);
+      playTone({ freq: 110, duration: 0.18, volume: 0.11, attack: 0.003, release: 0.16, type: 'sine' });
+      playTone({ freq: 523, duration: 0.11, volume: 0.07, delay: 0.06, type: 'sine' });
+      playTone({ freq: 659, duration: 0.13, volume: 0.06, delay: 0.11, type: 'sine' });
+      playTone({ freq: 784, duration: 0.16, volume: 0.05, delay: 0.16, type: 'sine', filterFreq: 2200 });
+      break;
+    case 'over':
+      playTone({ freq: 220, freqEnd: 440, duration: 0.14, volume: 0.07, type: 'triangle', filterFreq: 1600 });
+      playTone({ freq: 587, duration: 0.2, volume: 0.09, delay: 0.08, type: 'sine' });
+      playTone({ freq: 880, duration: 0.12, volume: 0.05, delay: 0.14, type: 'sine', filterFreq: 2000 });
+      break;
+    case 'extreme':
+      playSoftNoise(0.12, 0.04, 0, 420);
+      playTone({ freq: 82, duration: 0.28, volume: 0.1, attack: 0.004, release: 0.24, type: 'sine' });
+      playTone({ freq: 165, duration: 0.22, volume: 0.07, delay: 0.04, type: 'triangle' });
+      playTone({ freq: 622, duration: 0.18, volume: 0.06, delay: 0.12, type: 'sine', filterFreq: 2400 });
+      playTone({ freq: 932, duration: 0.24, volume: 0.045, delay: 0.18, type: 'sine', filterFreq: 2600 });
+      break;
+    default:
+      playTone({ freq: 440, duration: 0.14, volume: 0.07, type: 'sine' });
+  }
 }
 
 function flashScreen(className = '', duration = 80, peakOpacity = 0.85) {
@@ -1712,25 +1894,20 @@ function triggerFinishEffect(type, player) {
     flashScreen('burst-flash');
     burstRing(color);
     spawnParticles(scaledFxCount(liteFx ? 18 : 40), color, 'burst');
-    playBeep(120, 0.15);
   } else if (type === 'extreme') {
     shakeScreen('heavy', liteFx ? 520 : 600);
     flashScreen('extreme-flash');
     spawnParticles(scaledFxCount(liteFx ? 28 : 80), '#bf5af2', 'extreme');
     spawnParticles(scaledFxCount(liteFx ? 14 : 40), '#ffd60a', 'extreme');
-    playBeep(80, 0.25);
   } else if (type === 'over') {
     shakeScreen('light', liteFx ? 340 : 400);
     flashScreen();
     spawnParticles(scaledFxCount(liteFx ? 10 : 25), '#ffd60a', 'over');
-    playBeep(300, 0.1);
   } else {
     spawnParticles(scaledFxCount(liteFx ? 8 : 15), color, 'spin');
-    playBeep(520, 0.06);
   }
 
-  playFinishImpact(type);
-  if (!inReplay) speakFinishTerm(type);
+  playFinishStinger(type);
 }
 
 function burstRing(color, delay = 0, ringIndex = 1) {
@@ -3408,8 +3585,13 @@ function init() {
     if (typeof runEventChecklist === 'function') runEventChecklist();
   });
   document.body.addEventListener('pointerdown', () => {
-    warmCompetitionAssets().catch(() => {});
+    tryPlayArenaBgm();
+    setTimeout(() => warmCompetitionAssets().catch(() => {}), 200);
   }, { once: true });
+  document.body.addEventListener('pointerdown', () => {
+    if (bgmPausedForCountdown || !isBgmEnabled() || !arenaBgm?.paused) return;
+    tryPlayArenaBgm();
+  });
   $('#btn-copy-player-link')?.addEventListener('click', () => { copyPlayerLink().catch(console.error); });
   updatePlayerQrDisplay().catch(console.error);
 
@@ -3428,7 +3610,27 @@ function init() {
     state.lanBaseUrl = url;
     state.phoneCamBaseUrl = await getPhoneCamBaseUrl();
   });
-  if (goShootAudio) goShootAudio.load();
+  if (goShootAudio) {
+    goShootAudio.load();
+    initGoShootAudioGain();
+  }
+  if (arenaBgm) {
+    arenaBgm.volume = getBgmVolume();
+    arenaBgm.load();
+  }
+  syncBgmToggleUI();
+  $('#arena-bgm-toggle')?.addEventListener('change', (e) => {
+    setBgmEnabled(e.target.checked);
+    if (typeof showToast === 'function') {
+      showToast(e.target.checked ? '背景音樂已開啟' : '背景音樂已關閉');
+    }
+  });
+  $('#arena-bgm-quick')?.addEventListener('change', (e) => {
+    setBgmEnabled(e.target.checked);
+  });
+  $('#arena-bgm-volume')?.addEventListener('input', (e) => {
+    setBgmVolume(parseInt(e.target.value, 10) / 100);
+  });
   listCameras({ requestPermission: true });
   pushArenaLiveState();
 }

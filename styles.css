@@ -159,7 +159,7 @@ body {
 
 body.shake { animation: screenShake 0.4s ease; }
 body.shake-heavy { animation: screenShakeHeavy 0.65s ease; }
-body.shake-go-shoot { animation: screenShakeGoShoot 1s cubic-bezier(0.22, 1, 0.36, 1); }
+body.shake-go-shoot { animation: screenShakeGoShoot 1.1s cubic-bezier(0.22, 1, 0.36, 1); }
 
 @keyframes screenShake {
   0%, 100% { transform: translate(0); }
@@ -1312,7 +1312,7 @@ body.launch-active .camera-viewport {
 
 #camera-viewport.shake { animation: viewportShake 0.4s ease; }
 #camera-viewport.shake-heavy { animation: viewportShakeHeavy 0.65s ease; }
-#camera-viewport.shake-go-shoot { animation: viewportShakeGoShoot 1s cubic-bezier(0.22, 1, 0.36, 1); }
+#camera-viewport.shake-go-shoot { animation: viewportShakeGoShoot 1.1s cubic-bezier(0.22, 1, 0.36, 1); }
 
 @keyframes viewportShake {
   0%, 100% { transform: translate3d(0, 0, 0); }
@@ -1487,7 +1487,7 @@ body.anime-impact-frame .launch-camera-vignette {
 }
 
 .launch-camera-overlay.shockwave .launch-camera-vignette {
-  animation: vignetteShock 0.85s ease-out;
+  animation: vignetteShock 1.05s ease-out;
 }
 
 @keyframes vignetteShock {
@@ -1726,7 +1726,7 @@ body.anime-impact-frame .launch-camera-vignette {
 }
 
 body.go-shoot-moment .camera-viewport {
-  animation: camGoShootPunch 0.9s cubic-bezier(0.22, 1.2, 0.36, 1);
+  animation: camGoShootPunch 1.1s cubic-bezier(0.22, 1.2, 0.36, 1);
   filter: contrast(1.15) saturate(1.2);
 }
 
@@ -2999,7 +2999,7 @@ body.replay-theater-active.shake-go-shoot {
 
 .replay-theater.shake { animation: screenShake 0.4s ease; }
 .replay-theater.shake-heavy { animation: screenShakeHeavy 0.65s ease; }
-.replay-theater.shake-go-shoot { animation: screenShakeGoShoot 1s cubic-bezier(0.22, 1, 0.36, 1); }
+.replay-theater.shake-go-shoot { animation: screenShakeGoShoot 1.1s cubic-bezier(0.22, 1, 0.36, 1); }
 
 .btn-replay-theater-stop {
   position: absolute;
@@ -4761,6 +4761,22 @@ body.replay-theater-active .finish-announce {
 .admin-fieldset input {
   width: 100%;
   margin-top: 0.2rem;
+}
+.admin-bgm-volume {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.admin-bgm-volume input[type="range"] {
+  flex: 1;
+  min-width: 8rem;
+  margin-top: 0;
+}
+.admin-bgm-volume #arena-bgm-volume-label {
+  min-width: 2.5rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
 }
 .admin-modal-actions {
   display: flex;
