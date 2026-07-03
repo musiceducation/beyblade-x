@@ -604,6 +604,50 @@ def find_mediamtx():
     ))
 
 
+def _pids_on_port(port):
+    try:
+        out = subprocess.check_output(
+            ['lsof', '-ti', f'tcp:{port}'],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return []
+    return [int(p) for p in out.splitlines() if p.strip().isdigit()]
+
+
+def _proc_cmdline(pid):
+    try:
+        return subprocess.check_output(
+            ['ps', '-p', str(pid), '-o', 'args='],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return ''
+
+
+def check_https_port():
+    """If our server is already listening, print the URL and exit cleanly."""
+    pids = _pids_on_port(PORT)
+    if not pids:
+        return
+    script = os.path.abspath(__file__)
+    for pid in pids:
+        cmd = _proc_cmdline(pid)
+        if script in cmd:
+            lan = get_lan_ip()
+            host = lan or 'localhost'
+            print(f'競賽伺服器已在運行（PID {pid}）。')
+            print(f'網址：https://{host}:{PORT}/')
+            sys.exit(0)
+    print(f'Port {PORT} is already in use:', file=sys.stderr)
+    for pid in pids:
+        print(f'  PID {pid}: {_proc_cmdline(pid)}', file=sys.stderr)
+    print(f'Free it with: kill {" ".join(map(str, pids))}', file=sys.stderr)
+    sys.exit(1)
+
+
 def free_rtmp_port():
     """Stop leftover mediamtx from a prior session so ffmpeg -listen can bind :1935."""
     try:
@@ -1229,9 +1273,15 @@ def ensure_cert():
 def main():
     os.chdir(DIR)
     ensure_cert()
+    check_https_port()
     load_replay_index()
     handler = ArenaHandler
-    httpd = http.server.ThreadingHTTPServer(('0.0.0.0', PORT), handler)
+    try:
+        httpd = http.server.ThreadingHTTPServer(('0.0.0.0', PORT), handler)
+    except OSError as err:
+        if err.errno in (48, 98):  # macOS / Linux: address already in use
+            check_https_port()
+        raise
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(CERT, KEY)
     httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)

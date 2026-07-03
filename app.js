@@ -202,7 +202,10 @@ function updateArenaSyncBanner() {
   }
   let pendingReplays = 0;
   if (typeof replayState !== 'undefined') {
-    pendingReplays = replayState.replays.filter((r) => r.videoId && r.cloudSynced === false).length;
+    pendingReplays = replayState.replays.filter(
+      (r) => (typeof replayNeedsLanUpload === 'function' && replayNeedsLanUpload(r))
+        || (typeof replayNeedsCloudUpload === 'function' && replayNeedsCloudUpload(r)),
+    ).length;
     if (pendingReplays > 0) {
       issues.push(`回放待傳 ${pendingReplays}`);
       primaryIssue = primaryIssue || 'replay';
@@ -3547,7 +3550,7 @@ function init() {
 
   syncFinishButtons();
   initTournament();
-  initReplay();
+  initReplay().catch(console.error);
   initAppViews();
   initArenaSyncBanner();
   updateUndoButton();

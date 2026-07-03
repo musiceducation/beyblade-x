@@ -134,14 +134,42 @@ function replayDebug(...args) {
   if (isReplayDebug()) console.log('[replay]', ...args);
 }
 
+function replayNeedsLanUpload(replay) {
+  if (!replay) return false;
+  if (replay.serverSynced === true) return false;
+  if (replay.serverSynced === false) return true;
+  return true;
+}
+
+function replayNeedsCloudUpload(replay) {
+  if (!replay) return false;
+  if (typeof isSupabaseSyncEnabled !== 'function' || !isSupabaseSyncEnabled()) return false;
+  if (replay.cloudSynced === true) return false;
+  if (replay.cloudSynced === false) return true;
+  return replay.serverSynced === true || replayHasVideo(replay);
+}
+
+function mergeReplayFromServer(local, server) {
+  const merged = local ? { ...local, ...server } : { ...server };
+  if (local?.serverSynced !== undefined) merged.serverSynced = local.serverSynced;
+  else merged.serverSynced = true;
+  if (local?.cloudSynced !== undefined) {
+    merged.cloudSynced = local.cloudSynced;
+  } else if (typeof isSupabaseSyncEnabled === 'function' && !isSupabaseSyncEnabled()) {
+    merged.cloudSynced = true;
+  }
+  if (local?.serverSyncError) merged.serverSyncError = local.serverSyncError;
+  if (local?.cloudSyncError) merged.cloudSyncError = local.cloudSyncError;
+  if ((local?.events?.length || 0) > (server.events?.length || 0)) merged.events = local.events;
+  return merged;
+}
+
 function updateReplaySyncStatus() {
   const el = $('#replay-sync-status');
   if (!el) return;
   el.hidden = false;
-  const pendingLan = replayState.replays.filter((r) => r.serverSynced === false).length;
-  const pendingCloud = typeof isSupabaseSyncEnabled === 'function' && isSupabaseSyncEnabled()
-    ? replayState.replays.filter((r) => r.cloudSynced === false).length
-    : 0;
+  const pendingLan = replayState.replays.filter((r) => replayNeedsLanUpload(r)).length;
+  const pendingCloud = replayState.replays.filter((r) => replayNeedsCloudUpload(r)).length;
   const uploading = replayState.serverUploadPending;
   const retryBtn = $('#btn-replay-retry-upload');
   const hasPending = pendingLan > 0 || pendingCloud > 0;
@@ -221,7 +249,9 @@ async function uploadReplayToServer(session, blob, attempt = 0) {
 }
 
 async function retryPendingReplayUploads() {
-  const pending = replayState.replays.filter((r) => r.serverSynced !== true || r.cloudSynced !== true);
+  const pending = replayState.replays.filter(
+    (r) => replayNeedsLanUpload(r) || replayNeedsCloudUpload(r),
+  );
   for (const replay of pending) {
     let blob = null;
     if (replay.videoId) {
@@ -229,9 +259,9 @@ async function retryPendingReplayUploads() {
         blob = await getReplayVideo(replay.videoId);
       } catch (_) { /* no local video */ }
     }
-    if (replay.serverSynced !== true) {
+    if (replayNeedsLanUpload(replay)) {
       uploadReplayToServer(replay, blob).catch(console.error);
-    } else if (typeof uploadReplayToSupabase === 'function' && isSupabaseSyncEnabled() && replay.cloudSynced !== true) {
+    } else if (typeof uploadReplayToSupabase === 'function' && replayNeedsCloudUpload(replay)) {
       uploadReplayToSupabase(replay, blob).then(() => {
         saveReplayList();
         updateReplaySyncStatus();
@@ -662,7 +692,19 @@ async function syncReplayListFromServer() {
     if (!res.ok) return;
     const data = await res.json();
     if (!Array.isArray(data.replays)) return;
-    replayState.replays = data.replays;
+
+    const localById = new Map(replayState.replays.map((r) => [r.id, r]));
+    const merged = new Map();
+    data.replays.forEach((serverReplay) => {
+      merged.set(serverReplay.id, mergeReplayFromServer(localById.get(serverReplay.id), serverReplay));
+    });
+    replayState.replays.forEach((localReplay) => {
+      if (!merged.has(localReplay.id)) merged.set(localReplay.id, localReplay);
+    });
+
+    replayState.replays = [...merged.values()].sort(
+      (a, b) => (b.createdAt || b.endedAt || '').localeCompare(a.createdAt || a.endedAt || ''),
+    );
     saveReplayList();
     renderReplayList();
   } catch (err) {
@@ -1392,8 +1434,8 @@ function updateTheaterPlayButton(tv) {
 function scoresAtTheaterTime(schedule, timeSec, startScores) {
   let scores = [...startScores];
   schedule.forEach((entry) => {
-    if (entry.videoSeek != null && entry.videoSeek <= timeSec + 0.05) {
-      scores = [...entry.event.scores];
+    if (entry.videoSeek != null && entry.videoSeek <= timeSec + 0.05 && entry.event.scores) {
+      scores = [entry.event.scores[0], entry.event.scores[1]];
     }
   });
   return scores;
@@ -1980,14 +2022,14 @@ async function clearAllReplays() {
   updateReplaySyncStatus();
 }
 
-function initReplay() {
+async function initReplay() {
   if (isReplayDebug()) {
     replayState.debug = true;
     console.info('[replay] debug mode on (?replayDebug=1)');
   }
   loadReplayList();
   renderReplayList();
-  syncReplayListFromServer();
+  await syncReplayListFromServer();
   updateReplaySyncStatus();
   retryPendingReplayUploads();
 

@@ -12,6 +12,7 @@ import {
   applyReplayZoom,
   buildFinishSchedule,
   FINISH_ANNOUNCE_LABELS,
+  getReplayPlaybackRate,
   getReplayStartScores,
   getReplayZoom,
   isReplayDebug,
@@ -148,7 +149,8 @@ export default function ReplayTheater({
       roundResolveRef.current = resolve;
       const onEnd = () => finishRound();
       video.addEventListener('ended', onEnd, { once: true });
-      const maxMs = videoDuration > 0 ? videoDuration * 1000 + 3000 : 120000;
+      const rate = getReplayPlaybackRate();
+      const maxMs = videoDuration > 0 ? (videoDuration / rate) * 1000 + 3000 : 120000;
       const fallbackId = window.setTimeout(onEnd, maxMs);
       timersRef.current.push(fallbackId);
     });
