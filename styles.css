@@ -1350,10 +1350,6 @@ body.launch-active #camera-feed.active {
   transform-origin: center center;
 }
 
-body.launch-active #camera-feed.active.mirrored {
-  animation: camZoomInMirror 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-}
-
 @keyframes camPanelExpand {
   from { opacity: 0.6; transform: scale(0.85); }
   to { opacity: 1; transform: scale(1); }
@@ -1362,11 +1358,6 @@ body.launch-active #camera-feed.active.mirrored {
 @keyframes camZoomIn {
   from { transform: scale(1); }
   to { transform: scale(1.18); }
-}
-
-@keyframes camZoomInMirror {
-  from { transform: scaleX(-1) scale(1); }
-  to { transform: scaleX(-1) scale(1.18); }
 }
 
 .launch-camera-overlay {
@@ -1894,7 +1885,6 @@ body.launch-active .rec-badge {
 }
 
 #camera-feed.active { display: block; }
-#camera-feed.mirrored { transform: scaleX(-1); }
 
 #camera-feed-img {
   width: 100%;
@@ -1902,8 +1892,6 @@ body.launch-active .rec-badge {
   object-fit: cover;
   display: block;
 }
-
-#camera-feed-img.mirrored { transform: scaleX(-1); }
 
 .cam-source-select { max-width: 220px; }
 
@@ -2050,10 +2038,6 @@ body.launch-active .rec-badge {
 body.launch-active #camera-feed-img {
   animation: camZoomIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards;
   transform-origin: center center;
-}
-
-body.launch-active #camera-feed-img.mirrored {
-  animation: camZoomInMirror 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 .camera-placeholder {
@@ -3092,6 +3076,11 @@ body.replay-theater-active .arena-header {
 }
 
 .victory-overlay[hidden] { display: none; }
+
+/* Keep header controls (e.g. 重置對戰) clickable above the victory overlay */
+body.victory-open .arena-header {
+  z-index: 2100;
+}
 
 .victory-overlay-inner {
   display: flex;

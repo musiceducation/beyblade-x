@@ -275,9 +275,35 @@ def _utc_iso():
     return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S') + 'Z'
 
 
+# region agent log
+def portal_debug_log(hypothesis_id, location, message, data=None):
+    payload = {
+        'sessionId': 'aee127',
+        'runId': 'pre-fix',
+        'hypothesisId': hypothesis_id,
+        'location': location,
+        'message': message,
+        'data': data or {},
+        'timestamp': int(time.time() * 1000),
+    }
+    try:
+        with open(os.path.join(DIR, '.cursor', 'debug-aee127.log'), 'a', encoding='utf-8') as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + '\n')
+    except OSError:
+        pass
+# endregion
+
+
 def _supabase_request(method, path, body=None, content_type='application/json', extra_headers=None):
     cfg = get_cloud_config()
     if not cfg:
+        # region agent log
+        portal_debug_log('H1,H3,H4', 'serve-https.py:296', 'supabase request skipped', {
+            'method': method,
+            'path': path,
+            'reason': 'cloud not configured',
+        })
+        # endregion
         return None, b'cloud not configured'
 
     url = f"{cfg['supabaseUrl']}{path}"
@@ -297,10 +323,38 @@ def _supabase_request(method, path, body=None, content_type='application/json', 
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
-            return resp.status, resp.read()
+            raw = resp.read()
+            # region agent log
+            portal_debug_log('H3,H4,H5', 'serve-https.py:326', 'supabase request succeeded', {
+                'method': method,
+                'path': path,
+                'status': resp.status,
+                'bytes': len(raw),
+                'contentType': content_type,
+            })
+            # endregion
+            return resp.status, raw
     except urllib.error.HTTPError as err:
-        return err.code, err.read()
+        raw = err.read()
+        # region agent log
+        portal_debug_log('H3,H4,H5', 'serve-https.py:338', 'supabase request http error', {
+            'method': method,
+            'path': path,
+            'status': err.code,
+            'body': raw.decode('utf-8', errors='replace')[:500],
+            'contentType': content_type,
+        })
+        # endregion
+        return err.code, raw
     except OSError as err:
+        # region agent log
+        portal_debug_log('H1,H3,H4', 'serve-https.py:350', 'supabase request os error', {
+            'method': method,
+            'path': path,
+            'error': str(err)[:500],
+            'contentType': content_type,
+        })
+        # endregion
         return None, str(err).encode('utf-8')
 
 
@@ -979,6 +1033,13 @@ class ArenaHandler(http.server.SimpleHTTPRequestHandler):
 
         if path == '/cloud/status.json':
             cfg = get_cloud_config()
+            # region agent log
+            portal_debug_log('H1,H5', 'serve-https.py:1017', 'cloud status requested', {
+                'configured': cfg is not None,
+                'eventSlug': cfg['eventSlug'] if cfg else None,
+                'hasPlayerPortalUrl': bool(cfg.get('playerPortalUrl')) if cfg else False,
+            })
+            # endregion
             self._send_json({
                 'ok': cfg is not None,
                 'eventSlug': cfg['eventSlug'] if cfg else None,
@@ -1024,6 +1085,25 @@ class ArenaHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split('?', 1)[0]
+
+        if path == '/debug/agent-log.json':
+            raw = self._read_body()
+            try:
+                payload = json.loads(raw.decode('utf-8') or '{}')
+            except json.JSONDecodeError:
+                self._send_json({'error': 'bad json'}, 400)
+                return
+            if payload.get('sessionId') == 'aee127':
+                # region agent log
+                portal_debug_log(
+                    payload.get('hypothesisId') or 'H0',
+                    payload.get('location') or 'browser',
+                    payload.get('message') or 'browser debug log',
+                    payload.get('data') if isinstance(payload.get('data'), dict) else {},
+                )
+                # endregion
+            self._send_json({'ok': True})
+            return
 
         if path == '/dji/start':
             ok, message = DJI_RELAY.start()

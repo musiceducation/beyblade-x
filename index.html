@@ -92,7 +92,7 @@
       <button id="btn-shortcuts-help" class="btn btn-ghost" type="button" title="快捷鍵（?）">?</button>
       <button id="btn-event-checklist" class="btn btn-ghost" type="button" title="開賽檢查">✅</button>
       <button id="btn-admin-settings" class="btn btn-ghost" type="button" title="管理設定">⚙</button>
-      <button id="btn-reset-match" class="btn btn-ghost">重置對戰</button>
+      <button id="btn-reset-match" class="btn btn-ghost" type="button">重置對戰</button>
     </div>
   </header>
 
@@ -168,9 +168,16 @@
           <label class="toggle voice-toggle">
             <input type="checkbox" id="voice-countdown" checked> Shu 音效
           </label>
+          <label class="toggle voice-toggle">
+            <input type="checkbox" id="voice-finish" checked> Finish 語音
+          </label>
         </div>
         <audio id="go-shoot-audio" preload="auto" src="321goshoot.m4a"></audio>
-        <audio id="arena-bgm" loop preload="auto" src="dran-brave-old.mp3"></audio>
+        <audio id="finish-audio-spin" preload="auto" src="finish-spin.mp3"></audio>
+        <audio id="finish-audio-burst" preload="auto" src="finish-burst.mp3"></audio>
+        <audio id="finish-audio-over" preload="auto" src="finish-over.mp3"></audio>
+        <audio id="finish-audio-extreme" preload="auto" src="finish-extreme.mp3"></audio>
+        <audio id="arena-bgm" preload="auto"></audio>
         <label class="toggle voice-toggle">
           <input type="checkbox" id="arena-bgm-quick" checked> 背景音樂
         </label>
@@ -267,10 +274,11 @@
       <div class="tournament-body">
         <div class="roster-panel">
           <div class="roster-toolbar">
-            <span id="roster-count" class="roster-count">0 / 16</span>
+            <span id="roster-count" class="roster-count">0 / 不限</span>
             <div class="roster-add-row">
               <input id="new-player-name" type="text" placeholder="選手姓名" maxlength="16">
               <button id="btn-add-player" class="btn btn-sm btn-primary" type="button">加入</button>
+              <button id="btn-reset-roster" class="btn btn-sm btn-ghost tournament-tools-danger" type="button">重置選手名單</button>
             </div>
           </div>
           <ul id="roster-list" class="roster-list"></ul>
@@ -301,9 +309,6 @@
             </select>
             <button id="btn-cam-start" class="btn btn-sm btn-primary" data-label-local="連接鏡頭" data-label-remote="等待手機 QR…">連接鏡頭</button>
             <button id="btn-cam-stop" class="btn btn-sm btn-ghost" disabled>停止</button>
-            <label class="toggle" id="cam-mirror-wrap">
-              <input type="checkbox" id="cam-mirror" checked> 鏡像
-            </label>
           </div>
         </div>
         <div id="cam-local-panel" class="cam-sub-panel">
@@ -461,6 +466,7 @@
         <p id="victory-detail" class="victory-detail">對戰完成</p>
         <div class="victory-actions">
           <button id="btn-dismiss-victory" class="btn btn-primary">繼續</button>
+          <button id="btn-victory-reset" class="btn btn-ghost" type="button">重置對戰</button>
           <button id="btn-victory-revert" class="btn btn-ghost" type="button" hidden>↩ 撤銷完場</button>
           <button id="btn-victory-bracket" class="btn btn-ghost" type="button" hidden>查看完整賽程</button>
         </div>
@@ -575,6 +581,10 @@
         <label class="checklist-competition-toggle">
           <input type="checkbox" id="arena-bgm-toggle" checked>
           背景音樂（321 倒數時自動暫停）
+        </label>
+        <label class="checklist-competition-toggle">
+          <input type="checkbox" id="voice-finish-admin" checked>
+          得分語音（Spin Finish 等）
         </label>
         <label class="admin-bgm-volume">
           音樂音量

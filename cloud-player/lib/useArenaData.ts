@@ -11,6 +11,38 @@ const LIVE_POLL_MS = 800;
 const IDLE_POLL_MS = 4000;
 const REPLAY_POLL_MS = 12000;
 
+// #region agent log
+function portalDebugLog(hypothesisId: string, location: string, message: string, data: Record<string, unknown> = {}) {
+  fetch('http://127.0.0.1:7781/ingest/44c3a4a2-b31c-4d72-b415-659fb6f08241', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'aee127' },
+    body: JSON.stringify({
+      sessionId: 'aee127',
+      runId: 'pre-fix',
+      hypothesisId,
+      location,
+      message,
+      data,
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {
+    fetch('/debug/agent-log.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: 'aee127',
+        runId: 'pre-fix',
+        hypothesisId,
+        location,
+        message,
+        data,
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  });
+}
+// #endregion
+
 export function useArenaData(tab: 'live' | 'schedule' | 'replay' | 'results') {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('connecting');
   const [configError, setConfigError] = useState<string | null>(null);
@@ -43,6 +75,11 @@ export function useArenaData(tab: 'live' | 'schedule' | 'replay' | 'results') {
     const supabase = getSupabase();
     const slug = getEventSlug();
     if (!supabase) {
+      // #region agent log
+      portalDebugLog('H5', 'cloud-player/lib/useArenaData.ts:61', 'portal arena fetch unconfigured', {
+        slug,
+      });
+      // #endregion
       setSyncStatus('unconfigured');
       setConfigError('請設定 NEXT_PUBLIC_SUPABASE_URL 與 ANON_KEY');
       return false;
@@ -57,10 +94,28 @@ export function useArenaData(tab: 'live' | 'schedule' | 'replay' | 'results') {
     if (error) throw error;
     if (data) {
       const row = data as ArenaStateRow;
+      // #region agent log
+      portalDebugLog('H5,H3', 'cloud-player/lib/useArenaData.ts:81', 'portal arena fetch row', {
+        slug,
+        revision: row.revision,
+        updatedAt: row.updated_at,
+        juniorPlayers: row.junior?.players?.length || 0,
+        seniorPlayers: row.senior?.players?.length || 0,
+        hasLive: Boolean(row.live),
+        liveUpdatedAt: row.live?.updatedAt || null,
+        liveSession: row.live?.session || null,
+      });
+      // #endregion
       if (row.revision !== revisionRef.current) {
         revisionRef.current = row.revision;
         setArenaState(row);
       }
+    } else {
+      // #region agent log
+      portalDebugLog('H5', 'cloud-player/lib/useArenaData.ts:99', 'portal arena fetch empty', {
+        slug,
+      });
+      // #endregion
     }
     return true;
   }, []);
@@ -80,6 +135,15 @@ export function useArenaData(tab: 'live' | 'schedule' | 'replay' | 'results') {
     if (error) throw error;
     const rows = (data as ArenaReplayRow[]) || [];
     const hash = rows.map((r) => `${r.id}:${r.has_video}`).join('|');
+    // #region agent log
+    portalDebugLog('H4,H5', 'cloud-player/lib/useArenaData.ts:117', 'portal replay fetch rows', {
+      slug,
+      count: rows.length,
+      videoCount: rows.filter((r) => r.has_video).length,
+      firstId: rows[0]?.id || null,
+      hash,
+    });
+    // #endregion
     if (hash !== replayHashRef.current) {
       replayHashRef.current = hash;
       setReplays(rows);
@@ -112,7 +176,14 @@ export function useArenaData(tab: 'live' | 'schedule' | 'replay' | 'results') {
       setConfigError(null);
       setUsingCache(false);
       setLastUpdated(new Date());
-    } catch {
+    } catch (err) {
+      // #region agent log
+      portalDebugLog('H5', 'cloud-player/lib/useArenaData.ts:151', 'portal refresh failed', {
+        tab,
+        forceReplays: Boolean(opts?.forceReplays),
+        error: String((err as Error)?.message || err),
+      });
+      // #endregion
       if (applyCacheFallback()) {
         setConfigError(null);
       } else {
@@ -163,6 +234,16 @@ export function useArenaData(tab: 'live' | 'schedule' | 'replay' | 'results') {
         (payload) => {
           const row = payload.new as ArenaStateRow | null;
           if (!row?.event_slug) return;
+          // #region agent log
+          portalDebugLog('H5,H3', 'cloud-player/lib/useArenaData.ts:202', 'portal arena realtime event', {
+            slug,
+            revision: row.revision,
+            previousRevision: revisionRef.current,
+            hasLive: Boolean(row.live),
+            liveUpdatedAt: row.live?.updatedAt || null,
+            liveSession: row.live?.session || null,
+          });
+          // #endregion
           if (row.revision !== revisionRef.current) {
             revisionRef.current = row.revision;
             setArenaState(row);
@@ -181,6 +262,11 @@ export function useArenaData(tab: 'live' | 'schedule' | 'replay' | 'results') {
           filter: `event_slug=eq.${slug}`,
         },
         () => {
+          // #region agent log
+          portalDebugLog('H4,H5', 'cloud-player/lib/useArenaData.ts:223', 'portal replay realtime event', {
+            slug,
+          });
+          // #endregion
           fetchReplays()
             .then(() => {
               setLastUpdated(new Date());

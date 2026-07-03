@@ -10,6 +10,33 @@ const supabaseSyncState = {
   cloudServerReady: false,
 };
 
+// #region agent log
+function portalDebugLog(hypothesisId, location, message, data = {}) {
+  const payload = {
+    sessionId: 'aee127',
+    runId: 'pre-fix',
+    hypothesisId,
+    location,
+    message,
+    data,
+    timestamp: Date.now(),
+  };
+  fetch('http://127.0.0.1:7781/ingest/44c3a4a2-b31c-4d72-b415-659fb6f08241', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'aee127' },
+    body: JSON.stringify(payload),
+  }).catch(() => {
+    fetch('/debug/agent-log.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+  });
+}
+
+if (typeof window !== 'undefined') window.portalDebugLog = portalDebugLog;
+// #endregion
+
 function getArenaConfig() {
   return typeof window !== 'undefined' ? window.ARENA_CONFIG : null;
 }
@@ -36,15 +63,39 @@ async function refreshCloudStatus() {
     const res = await fetch('/cloud/status.json', { cache: 'no-store' });
     const data = await res.json();
     supabaseSyncState.cloudServerReady = Boolean(data.ok);
+    // #region agent log
+    portalDebugLog('H1,H5', 'supabase-sync.js:54', 'cloud status refreshed', {
+      ok: Boolean(data.ok),
+      eventSlug: data.eventSlug || getArenaConfig()?.eventSlug || null,
+      hasPortalUrl: Boolean(data.playerPortalUrl || getArenaConfig()?.playerPortalUrl),
+      httpStatus: res.status,
+    });
+    // #endregion
     return data;
-  } catch {
+  } catch (err) {
     supabaseSyncState.cloudServerReady = false;
+    // #region agent log
+    portalDebugLog('H1', 'supabase-sync.js:65', 'cloud status failed', {
+      error: String(err?.message || err),
+    });
+    // #endregion
     return null;
   }
 }
 
 async function pushTournamentToSupabase(revision, junior, senior) {
-  if (!isSupabaseSyncEnabled() || supabaseSyncState.tournamentPushing) return false;
+  if (!isSupabaseSyncEnabled() || supabaseSyncState.tournamentPushing) {
+    // #region agent log
+    portalDebugLog('H1,H2', 'supabase-sync.js:76', 'cloud tournament push skipped', {
+      requestedRevision: revision,
+      lastTournamentRevision: supabaseSyncState.lastTournamentRevision,
+      cloudServerReady: supabaseSyncState.cloudServerReady,
+      eventSlug: getArenaConfig()?.eventSlug || null,
+      tournamentPushing: supabaseSyncState.tournamentPushing,
+    });
+    // #endregion
+    return false;
+  }
 
   const rev = Math.max(revision, supabaseSyncState.lastTournamentRevision + 1);
   if (typeof rev !== 'number' || rev <= supabaseSyncState.lastTournamentRevision) {
@@ -53,6 +104,17 @@ async function pushTournamentToSupabase(revision, junior, senior) {
 
   supabaseSyncState.tournamentPushing = true;
   try {
+    // #region agent log
+    portalDebugLog('H2,H5', 'supabase-sync.js:97', 'cloud tournament push started', {
+      requestedRevision: revision,
+      pushedRevision: rev,
+      lastTournamentRevision: supabaseSyncState.lastTournamentRevision,
+      juniorPlayers: junior?.players?.length || 0,
+      seniorPlayers: senior?.players?.length || 0,
+      juniorDrawn: Boolean(junior?.drawn),
+      seniorDrawn: Boolean(senior?.drawn),
+    });
+    // #endregion
     const res = await fetch('/cloud/tournament.json', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -66,10 +128,23 @@ async function pushTournamentToSupabase(revision, junior, senior) {
 
     supabaseSyncState.lastTournamentRevision = rev;
     supabaseSyncState.lastError = null;
+    // #region agent log
+    portalDebugLog('H2,H5', 'supabase-sync.js:121', 'cloud tournament push succeeded', {
+      pushedRevision: rev,
+      httpStatus: res.status,
+    });
+    // #endregion
     if (typeof updateCloudSyncIndicator === 'function') updateCloudSyncIndicator('synced');
     return true;
   } catch (err) {
     supabaseSyncState.lastError = String(err.message || err);
+    // #region agent log
+    portalDebugLog('H2,H5', 'supabase-sync.js:131', 'cloud tournament push failed', {
+      requestedRevision: revision,
+      pushedRevision: rev,
+      error: supabaseSyncState.lastError,
+    });
+    // #endregion
     console.warn('Cloud tournament push failed', err);
     if (typeof updateCloudSyncIndicator === 'function') updateCloudSyncIndicator('error', supabaseSyncState.lastError);
     return false;
@@ -84,11 +159,33 @@ async function pushTournamentPayloadToSupabase(payload) {
 }
 
 async function uploadReplayToSupabase(session, blob, attempt = 0) {
-  if (!isSupabaseSyncEnabled() || !session?.id) return false;
+  if (!isSupabaseSyncEnabled() || !session?.id) {
+    // #region agent log
+    portalDebugLog('H1,H4', 'supabase-sync.js:158', 'cloud replay upload skipped', {
+      replayId: session?.id || null,
+      cloudServerReady: supabaseSyncState.cloudServerReady,
+      eventSlug: getArenaConfig()?.eventSlug || null,
+      hasBlob: Boolean(blob),
+      blobSize: blob?.size || 0,
+    });
+    // #endregion
+    return false;
+  }
 
   const maxAttempts = 3;
 
   try {
+    // #region agent log
+    portalDebugLog('H4', 'supabase-sync.js:173', 'cloud replay upload started', {
+      replayId: session.id,
+      attempt,
+      hasVideoId: Boolean(session.videoId),
+      hasBlob: Boolean(blob),
+      blobSize: blob?.size || 0,
+      battleNum: session.battleNum || null,
+      matchGroupId: session.matchGroupId || null,
+    });
+    // #endregion
     const metaRes = await fetch('/cloud/replay/meta.json', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -113,6 +210,13 @@ async function uploadReplayToSupabase(session, blob, attempt = 0) {
 
     session.cloudSynced = true;
     session.cloudSyncError = null;
+    // #region agent log
+    portalDebugLog('H4,H5', 'supabase-sync.js:210', 'cloud replay upload succeeded', {
+      replayId: session.id,
+      attempt,
+      uploadedVideo: Boolean(blob && session.videoId && blob.size > 1024),
+    });
+    // #endregion
     return true;
   } catch (err) {
     if (attempt < maxAttempts - 1) {
@@ -121,6 +225,13 @@ async function uploadReplayToSupabase(session, blob, attempt = 0) {
     }
     session.cloudSynced = false;
     session.cloudSyncError = String(err.message || err);
+    // #region agent log
+    portalDebugLog('H4', 'supabase-sync.js:224', 'cloud replay upload failed', {
+      replayId: session.id,
+      attempt,
+      error: session.cloudSyncError,
+    });
+    // #endregion
     console.warn('Cloud replay upload failed', err);
     return false;
   }

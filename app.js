@@ -166,12 +166,49 @@ function pushArenaLiveState() {
   clearTimeout(arenaLiveTimer);
   arenaLiveTimer = setTimeout(() => {
     if (isLaunchCritical()) return;
+    const payload = buildArenaLivePayload();
+    // #region agent log
+    if (typeof portalDebugLog === 'function') {
+      portalDebugLog('H3,H5', 'app.js:237', 'arena live push started', {
+        session: payload.session,
+        phase: payload.phase,
+        scores: payload.scores,
+        battle: payload.battle,
+        matchOver: payload.matchOver,
+        active: payload.active,
+        matchLabel: payload.matchLabel || null,
+        broadcastStatus: payload.broadcastStatus,
+      });
+    }
+    // #endregion
     fetch('/arena/live.json', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildArenaLivePayload()),
+      body: JSON.stringify(payload),
       cache: 'no-store',
-    }).catch(() => {});
+    }).then((res) => {
+      // #region agent log
+      if (typeof portalDebugLog === 'function') {
+        portalDebugLog('H3', 'app.js:258', 'arena live push response', {
+          httpStatus: res.status,
+          ok: res.ok,
+          session: payload.session,
+          scores: payload.scores,
+          battle: payload.battle,
+        });
+      }
+      // #endregion
+    }).catch((err) => {
+      // #region agent log
+      if (typeof portalDebugLog === 'function') {
+        portalDebugLog('H3', 'app.js:270', 'arena live push failed', {
+          error: String(err?.message || err),
+          session: payload.session,
+          scores: payload.scores,
+        });
+      }
+      // #endregion
+    });
   }, 150);
 }
 
@@ -364,8 +401,12 @@ function showFinishAnnounce(type, player, points, playerNameOverride) {
   void overlay.offsetWidth;
   overlay.classList.add('show');
 
+  playFinishVoice(type);
+
   if (finishAnnounceHideTimer) clearTimeout(finishAnnounceHideTimer);
-  const announceMs = document.body.classList.contains('replay-theater-active') ? 1800 : 2400;
+  const announceMs = document.body.classList.contains('replay-theater-active')
+    ? 1800
+    : getFinishAnnounceMs(type);
   finishAnnounceHideTimer = setTimeout(() => {
     overlay.classList.remove('show');
     finishAnnounceHideTimer = setTimeout(() => {
@@ -498,6 +539,7 @@ function revertMatchEndingFinish(options = {}) {
     if (typeof renderTournamentUI === 'function') renderTournamentUI();
   }
   $('#victory-overlay').hidden = true;
+  document.body.classList.remove('victory-open');
   updateScoreDisplay();
   updateUndoButton();
   showToast('已撤銷完場，可繼續計分');
@@ -521,6 +563,8 @@ function undoLastFinish() {
   state.readyForNextRound = false;
   updateScoreDisplay();
   last.logEl?.remove();
+  cancelFinishVoice();
+  hideFinishAnnounce();
   updateUndoButton();
 
   if (typeof onReplayUndoFinish === 'function') {
@@ -562,6 +606,7 @@ function nextBattle() {
     state.finishHistory = [];
     updateUndoButton();
     $('#victory-overlay').hidden = true;
+    document.body.classList.remove('victory-open');
     updateScoreDisplay();
     addLog('— 新 Match 開始（分數歸零）—');
     if (typeof onReplayNewMatch === 'function') onReplayNewMatch();
@@ -611,6 +656,7 @@ function endMatch(winnerIdx) {
     $('#btn-dismiss-victory').textContent = '繼續';
   }
   $('#victory-overlay').hidden = false;
+  document.body.classList.add('victory-open');
 
   const scoreLine = `<span class="log-score">${score} : ${state.scores[1 - winnerIdx]}</span>`;
   if (inTournament) {
@@ -646,6 +692,7 @@ function resetMatchScoresOnly(options = {}) {
   updateUndoButton();
   updateScoreDisplay();
   $('#victory-overlay').hidden = true;
+  document.body.classList.remove('victory-open');
   resetLaunchTimer(!keepLaunch);
 }
 
@@ -657,23 +704,28 @@ function loadMatchScores(scores, battles, matchOver) {
   updateUndoButton();
   updateScoreDisplay();
   $('#victory-overlay').hidden = true;
+  document.body.classList.remove('victory-open');
   resetLaunchTimer();
 }
 
-function resetMatch(silent) {
-  if (!silent && (state.scores[0] || state.scores[1] || state.currentBattle > 1) && !confirm('重置整場 Match？累積分數將歸零。')) return;
+function resetMatch(silent = false) {
+  const hasProgress = state.scores[0] || state.scores[1] || state.currentBattle > 1 || state.matchOver;
+  if (!silent && hasProgress && !confirm('重置整場 Match？累積分數將歸零。')) return;
 
   state.scores = [0, 0];
   state.currentBattle = 1;
   state.matchOver = false;
   state.readyForNextRound = false;
   state.finishHistory = [];
+  state.victoryMatchId = null;
   updateUndoButton();
   updateScoreDisplay();
   $('#victory-overlay').hidden = true;
+  document.body.classList.remove('victory-open');
   if (!silent) {
     $('#battle-log').innerHTML = '';
     addLog('新 Match 開始 — 官方 4 分累積制');
+    showToast('已重置對戰');
   }
   if (typeof onReplayNewMatch === 'function') onReplayNewMatch();
   if (typeof onReplayDiscard === 'function') onReplayDiscard();
@@ -687,16 +739,23 @@ let launchPlaying = false;
 
 const goShootAudio = $('#go-shoot-audio');
 const arenaBgm = $('#arena-bgm');
+const ARENA_BGM_TRACKS = [
+  'bgm-demon-dragon.mp3',
+  'bgm-mirai-time-shift.mp3',
+  'bgm-xtreme-dash.mp3',
+  'bgm-phoenix-wing.mp3',
+];
+let bgmTrackIndex = 0;
 let bgmPausedForCountdown = false;
 let bgmPlaySeq = 0;
-// Waveform-measured from 321goshoot.m4a (7.34s): Three → Two → One → Go Shoot!
+// Waveform-measured from 321goshoot.m4a (7.48s): Three → Two → One → Go Shoot!
 const GO_SHOOT_SYNC = [
   { at: 0.60, label: 'Three' },
-  { at: 1.48, label: 'Two' },
-  { at: 2.32, label: 'One' },
-  { at: 3.33, label: 'Go Shoot!', fx: true, end: 4.37 },
+  { at: 1.52, label: 'Two' },
+  { at: 2.40, label: 'One' },
+  { at: 3.35, label: 'Go Shoot!', fx: true, end: 4.45 },
 ];
-const GO_SHOOT_DURATION = 7.384;
+const GO_SHOOT_DURATION = 7.477;
 const GO_SHOOT_VOLUME_GAIN = 3;
 const LAUNCH_ZOOM_MS = 200;
 const PARTICLE_CAP = 160;
@@ -705,6 +764,7 @@ const LOW_FX_MODE_KEY = 'bex-low-fx-mode';
 const REPLAY_BITRATE_KEY = 'bex-replay-bitrate';
 const BGM_ENABLED_KEY = 'bex-bgm-enabled';
 const BGM_VOLUME_KEY = 'bex-bgm-volume';
+const FINISH_VOICE_KEY = 'bex-finish-voice-enabled';
 const DEFAULT_BGM_VOLUME = 0.35;
 let launchRaf = null;
 let launchStep = -1;
@@ -846,6 +906,26 @@ function setBgmVolume(vol) {
   syncBgmToggleUI();
 }
 
+function setArenaBgmTrack(index) {
+  if (!arenaBgm || !ARENA_BGM_TRACKS.length) return;
+  bgmTrackIndex = ((index % ARENA_BGM_TRACKS.length) + ARENA_BGM_TRACKS.length) % ARENA_BGM_TRACKS.length;
+  const src = ARENA_BGM_TRACKS[bgmTrackIndex];
+  if (arenaBgm.getAttribute('src') !== src) {
+    arenaBgm.src = src;
+    arenaBgm.load();
+  }
+}
+
+function advanceArenaBgmTrack() {
+  setArenaBgmTrack(bgmTrackIndex + 1);
+}
+
+function onArenaBgmEnded() {
+  if (!isBgmEnabled() || bgmPausedForCountdown) return;
+  advanceArenaBgmTrack();
+  tryPlayArenaBgm();
+}
+
 function tryPlayArenaBgm() {
   if (!arenaBgm || !isBgmEnabled() || bgmPausedForCountdown) return;
   const seq = ++bgmPlaySeq;
@@ -899,7 +979,11 @@ async function warmCompetitionAssets() {
     try { await audioCtx.resume(); } catch (_) { /* ignore */ }
   }
   initGoShootAudioGain();
-  if (!goShootAudio) return false;
+  initFinishVoice();
+  Object.values(finishAudioEls).forEach((audio) => {
+    if (audio.readyState < 2) audio.load();
+  });
+  if (!goShootAudio) return Object.values(finishAudioEls).some((a) => a.readyState >= 2);
   const ready = await ensureGoShootAudioReady();
   if (!ready || goShootAudio.readyState < 2) return false;
   try {
@@ -1463,6 +1547,20 @@ function triggerCountdownStepEffect(label, stepIndex) {
   }
 }
 
+function getLaunchCountdownFinishMs() {
+  const steps = getScaledSync();
+  const last = steps[steps.length - 1];
+  if (!last) return 4600;
+  // End shortly after the Go Shoot! cue — don't wait for trailing silence in the m4a.
+  return Math.round(((last.end || last.at + 1.0) + 0.12) * 1000);
+}
+
+function scheduleLaunchCountdownFinish() {
+  launchTimers.push(setTimeout(() => {
+    if (launchPlaying) finishLaunchCountdown();
+  }, getLaunchCountdownFinishMs()));
+}
+
 function stopGoShootAudio() {
   resetLaunchTimer();
 }
@@ -1515,6 +1613,8 @@ function updateRelaunchButton() {
 }
 
 function finishLaunchCountdown() {
+  if (!launchPlaying) return;
+
   launchTimers.forEach((id) => {
     clearTimeout(id);
     clearInterval(id);
@@ -1524,15 +1624,24 @@ function finishLaunchCountdown() {
   launchRaf = null;
   launchStep = -1;
   goShootFxFired = false;
+
+  // Unlock scoring and resume BGM immediately — don't wait for overlay FX tail.
+  launchPlaying = false;
+  setScoringLocked(false);
+  resumeBgmAfterCountdown();
+
+  if (goShootAudio) {
+    goShootAudio.onended = null;
+    goShootAudio.pause();
+    goShootAudio.currentTime = 0;
+  }
+
   const el = $('#launch-timer');
   const btn = $('#btn-launch');
   el.textContent = '⚔';
   el.classList.remove('counting', 'go-shoot');
   btn.disabled = false;
-  launchPlaying = false;
   state.readyForNextRound = false;
-  setScoringLocked(false);
-  if (goShootAudio) goShootAudio.onended = null;
   addLog('Three, Two, One, Go Shoot!');
   if (typeof onReplayBattleStart === 'function') onReplayBattleStart();
   document.body.classList.remove('launch-countdown');
@@ -1547,7 +1656,6 @@ function finishLaunchCountdown() {
   if (badge) badge.setAttribute('data-hint', isTouchDevice() ? '點右上角返回賽程' : 'Esc 返回賽程');
   showExitLaunchButton();
   updateRelaunchButton();
-  resumeBgmAfterCountdown();
 }
 
 function triggerGoShootMoment() {
@@ -1616,11 +1724,9 @@ async function startLaunchCountdownFallback() {
   });
 
   const last = steps[steps.length - 1];
-  const finishAt = Math.round(((last.end || last.at + 1.2) + 0.35) * 1000);
   timers.push(setTimeout(() => {
-    launchPlaying = false;
-    finishLaunchCountdown();
-  }, finishAt));
+    if (launchPlaying) finishLaunchCountdown();
+  }, getLaunchCountdownFinishMs()));
 
   launchTimers = timers;
 }
@@ -1667,6 +1773,7 @@ async function startLaunchCountdownAudio() {
   if (playPromise) {
     playPromise.then(() => {
       syncLaunchVisuals();
+      scheduleLaunchCountdownFinish();
     }).catch(() => {
       if (goShootAudio) {
         goShootAudio.pause();
@@ -1678,6 +1785,7 @@ async function startLaunchCountdownAudio() {
     });
   } else {
     syncLaunchVisuals();
+    scheduleLaunchCountdownFinish();
   }
 }
 
@@ -1843,6 +1951,73 @@ function playFinishStinger(type) {
     default:
       playTone({ freq: 440, duration: 0.14, volume: 0.07, type: 'sine' });
   }
+}
+
+const FINISH_AUDIO = {
+  spin: 'finish-spin.mp3',
+  burst: 'finish-burst.mp3',
+  over: 'finish-over.mp3',
+  extreme: 'finish-extreme.mp3',
+};
+const finishAudioEls = {};
+
+function isFinishVoiceEnabled() {
+  return localStorage.getItem(FINISH_VOICE_KEY) !== '0';
+}
+
+function setFinishVoiceEnabled(on) {
+  localStorage.setItem(FINISH_VOICE_KEY, on ? '1' : '0');
+  syncFinishVoiceToggleUI();
+}
+
+function syncFinishVoiceToggleUI() {
+  const on = isFinishVoiceEnabled();
+  ['#voice-finish', '#voice-finish-admin'].forEach((sel) => {
+    const el = $(sel);
+    if (el) el.checked = on;
+  });
+}
+
+function initFinishVoice() {
+  const fromDom = {
+    spin: $('#finish-audio-spin'),
+    burst: $('#finish-audio-burst'),
+    over: $('#finish-audio-over'),
+    extreme: $('#finish-audio-extreme'),
+  };
+  Object.entries(FINISH_AUDIO).forEach(([type, src]) => {
+    if (finishAudioEls[type]) return;
+    finishAudioEls[type] = fromDom[type] || Object.assign(new Audio(src), { preload: 'auto' });
+  });
+}
+
+function cancelFinishVoice() {
+  Object.values(finishAudioEls).forEach((audio) => {
+    audio.pause();
+    audio.currentTime = 0;
+  });
+}
+
+function getFinishAnnounceMs(type) {
+  if (!isFinishVoiceEnabled()) return 2400;
+  const audio = finishAudioEls[type];
+  if (audio && Number.isFinite(audio.duration) && audio.duration > 0) {
+    return Math.min(6500, Math.max(2400, Math.round(audio.duration * 1000) + 500));
+  }
+  return 3200;
+}
+
+function playFinishVoice(type) {
+  if (!isFinishVoiceEnabled()) return;
+
+  const audio = finishAudioEls[type];
+  if (!audio) return;
+
+  resumeAudioCtx();
+  cancelFinishVoice();
+  audio.currentTime = 0;
+  audio.volume = 1;
+  audio.play().catch(() => {});
 }
 
 function flashScreen(className = '', duration = 80, peakOpacity = 0.85) {
@@ -2432,7 +2607,6 @@ function attachRemoteStream(remoteStream) {
   state.cameraStream = remoteStream;
   const video = $('#camera-feed');
   video.srcObject = remoteStream;
-  applyMirror();
 
   const markFeedReady = () => {
     // #region agent log
@@ -2710,8 +2884,6 @@ function updateCamSourcePanels() {
   $('#cam-remote-panel').hidden = mode !== 'remote';
   $('#cam-dji-panel').hidden = mode !== 'dji';
   $('#cam-url-panel').hidden = mode !== 'url';
-  const mirrorWrap = $('#cam-mirror-wrap');
-  if (mirrorWrap) mirrorWrap.hidden = mode === 'remote' || mode === 'dji';
   if (mode === 'remote') {
     redirectHostToLanIfNeeded().then((stay) => {
       if (!stay) return;
@@ -2882,7 +3054,6 @@ async function startLocalCamera() {
   const video = $('#camera-feed');
   video.srcObject = stream;
   showCameraActive(true);
-  applyMirror();
   await listCameras({ requestPermission: true });
   const label = stream.getVideoTracks()[0]?.label || '本機鏡頭';
   addLog(`本機鏡頭已連接：${label}`);
@@ -3087,7 +3258,6 @@ async function startDjiCamera() {
     gotFrame = true;
     showCameraActive(false);
     img.hidden = false;
-    applyMirror();
     $('#dji-status').textContent = 'DJI 畫面已連線 ✓';
     $('#dji-status').style.color = 'var(--blue)';
   };
@@ -3126,7 +3296,6 @@ function startUrlCamera() {
   img.onload = () => {
     showCameraActive(false);
     img.hidden = false;
-    applyMirror();
     addLog(`網路鏡頭已連接：${url}`);
   };
   img.onerror = () => {
@@ -3191,16 +3360,6 @@ function stopCamera(resetUi = true, keepPeer = false) {
   if (resetUi) hideCameraFeed();
   setRemoteStatus('已中斷連線');
   updateRemoteCamButtons();
-}
-
-function applyMirror() {
-  const mirror = (state.cameraMode === 'remote' || state.cameraMode === 'dji')
-    ? false
-    : $('#cam-mirror').checked;
-  const video = $('#camera-feed');
-  const img = $('#camera-feed-img');
-  video.classList.toggle('mirrored', mirror);
-  if (img) img.classList.toggle('mirrored', mirror);
 }
 
 async function copyDjiRtmp() {
@@ -3335,13 +3494,15 @@ function init() {
 
   $('#btn-next-battle').addEventListener('click', nextBattle);
   $('#btn-undo-finish')?.addEventListener('click', undoLastFinish);
-  $('#btn-reset-match').addEventListener('click', resetMatch);
+  $('#btn-reset-match')?.addEventListener('click', () => resetMatch());
+  $('#btn-victory-reset')?.addEventListener('click', () => resetMatch());
   $('#btn-launch').addEventListener('click', startLaunchCountdown);
   $('#btn-relaunch').addEventListener('click', startLaunchCountdown);
   $('#btn-dismiss-victory').addEventListener('click', () => {
     const inTournamentFlow = $('#victory-overlay').classList.contains('victory-overlay--tournament');
     if (typeof hideVictorySchedulePanel === 'function') hideVictorySchedulePanel();
     $('#victory-overlay').hidden = true;
+    document.body.classList.remove('victory-open');
     $('#btn-dismiss-victory').textContent = '繼續';
     if (inTournamentFlow && typeof switchAppView === 'function') {
       switchAppView('tournament');
@@ -3350,6 +3511,7 @@ function init() {
   $('#btn-victory-bracket')?.addEventListener('click', () => {
     if (typeof hideVictorySchedulePanel === 'function') hideVictorySchedulePanel();
     $('#victory-overlay').hidden = true;
+    document.body.classList.remove('victory-open');
     $('#btn-dismiss-victory').textContent = '繼續';
     if (typeof switchAppView === 'function') switchAppView('tournament');
   });
@@ -3371,7 +3533,6 @@ function init() {
 
   $('#btn-cam-start').addEventListener('click', startCamera);
   $('#btn-cam-stop').addEventListener('click', () => stopCamera());
-  $('#cam-mirror').addEventListener('change', applyMirror);
   $('#cam-source').addEventListener('change', () => {
     sessionStorage.setItem('cam-source-pref', $('#cam-source').value);
     updateCamSourcePanels();
@@ -3617,9 +3778,12 @@ function init() {
     goShootAudio.load();
     initGoShootAudioGain();
   }
+  initFinishVoice();
+  if (typeof syncFinishVoiceToggleUI === 'function') syncFinishVoiceToggleUI();
   if (arenaBgm) {
     arenaBgm.volume = getBgmVolume();
-    arenaBgm.load();
+    setArenaBgmTrack(Math.floor(Math.random() * ARENA_BGM_TRACKS.length));
+    arenaBgm.addEventListener('ended', onArenaBgmEnded);
   }
   syncBgmToggleUI();
   $('#arena-bgm-toggle')?.addEventListener('change', (e) => {
@@ -3633,6 +3797,15 @@ function init() {
   });
   $('#arena-bgm-volume')?.addEventListener('input', (e) => {
     setBgmVolume(parseInt(e.target.value, 10) / 100);
+  });
+  $('#voice-finish')?.addEventListener('change', (e) => {
+    setFinishVoiceEnabled(e.target.checked);
+    if (typeof showToast === 'function') {
+      showToast(e.target.checked ? '得分語音已開啟' : '得分語音已關閉');
+    }
+  });
+  $('#voice-finish-admin')?.addEventListener('change', (e) => {
+    setFinishVoiceEnabled(e.target.checked);
   });
   listCameras({ requestPermission: true });
   pushArenaLiveState();

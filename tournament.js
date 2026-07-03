@@ -2,7 +2,7 @@
  * Tournament — roster, draw, bracket schedule
  */
 
-const MAX_PLAYERS = 16;
+const QUARTER_ENTRANTS = 8;
 const STORAGE_KEY = 'beyblade-tournament-v1';
 const SYNC_POLL_MS = 1500;
 const LIVE_SYNC_DEBOUNCE_MS = 200;
@@ -118,20 +118,55 @@ function applyRemoteTournamentState(remote) {
 }
 
 async function pushTournamentState() {
-  if (!tournamentSync.enabled || tournamentSync.applyingRemote || tournamentSync.pushing) return;
+  if (!tournamentSync.enabled || tournamentSync.applyingRemote || tournamentSync.pushing) {
+    // #region agent log
+    if (typeof portalDebugLog === 'function') {
+      portalDebugLog('H2', 'tournament.js:121', 'local tournament push skipped', {
+        enabled: tournamentSync.enabled,
+        applyingRemote: tournamentSync.applyingRemote,
+        pushing: tournamentSync.pushing,
+        revision: tournamentSync.revision,
+        session: tournamentState.session,
+      });
+    }
+    // #endregion
+    return;
+  }
 
   tournamentSync.pushing = true;
   updateSyncIndicator('syncing');
   try {
+    const outgoingPayload = buildFullSyncPayload();
+    // #region agent log
+    if (typeof portalDebugLog === 'function') {
+      portalDebugLog('H2', 'tournament.js:139', 'local tournament push started', {
+        revision: outgoingPayload.revision,
+        session: tournamentState.session,
+        juniorPlayers: outgoingPayload.junior?.players?.length || 0,
+        seniorPlayers: outgoingPayload.senior?.players?.length || 0,
+        juniorDrawn: Boolean(outgoingPayload.junior?.drawn),
+        seniorDrawn: Boolean(outgoingPayload.senior?.drawn),
+      });
+    }
+    // #endregion
     const res = await fetch('/tournament/state.json', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildFullSyncPayload()),
+      body: JSON.stringify(outgoingPayload),
       cache: 'no-store',
     });
     const data = await res.json();
     if (res.ok && data.ok) {
       tournamentSync.revision = data.revision;
+      // #region agent log
+      if (typeof portalDebugLog === 'function') {
+        portalDebugLog('H2', 'tournament.js:160', 'local tournament push succeeded', {
+          serverRevision: data.revision,
+          updatedAt: data.updatedAt || null,
+          httpStatus: res.status,
+        });
+      }
+      // #endregion
       updateSyncIndicator('synced');
       if (typeof pushTournamentPayloadToSupabase === 'function') {
         const payload = buildFullSyncPayload();
@@ -142,12 +177,38 @@ async function pushTournamentState() {
     }
     if (res.status === 409 && data.revision) {
       tournamentSync.pendingConflict = data;
+      // #region agent log
+      if (typeof portalDebugLog === 'function') {
+        portalDebugLog('H2', 'tournament.js:176', 'local tournament conflict', {
+          clientRevision: outgoingPayload.revision,
+          serverRevision: data.revision,
+          httpStatus: res.status,
+        });
+      }
+      // #endregion
       showSyncConflictModal(data);
       updateSyncIndicator('error');
     } else {
+      // #region agent log
+      if (typeof portalDebugLog === 'function') {
+        portalDebugLog('H2', 'tournament.js:187', 'local tournament push rejected', {
+          clientRevision: outgoingPayload.revision,
+          httpStatus: res.status,
+          responseRevision: data.revision || null,
+        });
+      }
+      // #endregion
       updateSyncIndicator('error');
     }
-  } catch {
+  } catch (err) {
+    // #region agent log
+    if (typeof portalDebugLog === 'function') {
+      portalDebugLog('H2', 'tournament.js:198', 'local tournament push failed', {
+        revision: tournamentSync.revision,
+        error: String(err?.message || err),
+      });
+    }
+    // #endregion
     updateSyncIndicator('offline');
   } finally {
     tournamentSync.pushing = false;
@@ -367,6 +428,19 @@ function persistSession(options = {}) {
   const all = loadTournamentStorage();
   all[tournamentState.session] = buildSessionPayload();
   saveTournamentStorage(all);
+  // #region agent log
+  if (typeof portalDebugLog === 'function') {
+    portalDebugLog('H2,H5', 'tournament.js:422', 'local tournament session persisted', {
+      session: tournamentState.session,
+      skipPush,
+      syncEnabled: tournamentSync.enabled,
+      revision: tournamentSync.revision,
+      players: tournamentState.players.length,
+      drawn: tournamentState.drawn,
+      activeMatchId: tournamentState.activeMatchId || null,
+    });
+  }
+  // #endregion
   if (!skipPush && tournamentSync.enabled && !tournamentSync.applyingRemote) {
     pushTournamentState();
   }
@@ -402,7 +476,7 @@ function shuffle(arr) {
   return a;
 }
 
-function makeMatch(phase, index, p1Id, p2Id, label) {
+function makeMatch(phase, index, p1Id, p2Id, label, extra = {}) {
   return {
     id: `${phase}-${index}`,
     phase,
@@ -414,7 +488,97 @@ function makeMatch(phase, index, p1Id, p2Id, label) {
     scores: null,
     battles: null,
     liveScores: null,
+    ...extra,
   };
+}
+
+function getPrelimTarget(playerCount) {
+  if (playerCount > QUARTER_ENTRANTS) return QUARTER_ENTRANTS;
+  if (playerCount > 2 && playerCount % 2 === 1) return playerCount - 1;
+  return 0;
+}
+
+function getActiveQuarterMatches() {
+  const q = tournamentState.matches.quarter;
+  if (!q) return [];
+  return q.filter((m) => m.p1Id && m.p2Id);
+}
+
+function createReductionRound(phase, roundNo, entrants, targetCount, labelPrefix, startIndex = 0) {
+  const ids = [...entrants];
+  const matchesNeeded = Math.min(Math.floor(ids.length / 2), Math.max(0, ids.length - targetCount));
+  const matches = [];
+  for (let i = 0; i < matchesNeeded; i++) {
+    const p1Id = ids[i * 2];
+    const p2Id = ids[i * 2 + 1];
+    const needsRoundLabel = roundNo > 1 || ids.length > targetCount * 2;
+    const label = needsRoundLabel
+      ? `${labelPrefix} R${roundNo}-${i + 1}`
+      : `${labelPrefix} ${i + 1}`;
+    matches.push(makeMatch(phase, startIndex + i, p1Id, p2Id, label, { round: roundNo }));
+  }
+  return {
+    matches,
+    byes: ids.slice(matchesNeeded * 2),
+  };
+}
+
+function ensureReductionRound(phase, targetCount, labelPrefix, entrants, roundNo) {
+  const bucket = tournamentState.matches;
+  const byeKey = `${phase}Byes`;
+  if (!bucket[phase]) bucket[phase] = [];
+  if (!bucket[byeKey]) bucket[byeKey] = {};
+  if (bucket[phase].some((m) => (m.round || 1) === roundNo)) return;
+  const { matches, byes } = createReductionRound(
+    phase,
+    roundNo,
+    entrants,
+    targetCount,
+    labelPrefix,
+    bucket[phase].length,
+  );
+  bucket[phase].push(...matches);
+  bucket[byeKey][roundNo] = byes;
+}
+
+function advanceReductionPhase(phase, targetCount, labelPrefix) {
+  const bucket = tournamentState.matches;
+  const matches = bucket[phase] || [];
+  const byeKey = `${phase}Byes`;
+  const directKey = `${phase}Direct`;
+
+  if (!matches.length) {
+    return {
+      complete: true,
+      survivors: bucket[directKey] || [],
+    };
+  }
+
+  let roundNo = 1;
+  while (true) {
+    const roundMatches = matches.filter((m) => (m.round || 1) === roundNo);
+    if (!roundMatches.length) {
+      return { complete: false, survivors: [] };
+    }
+    roundMatches.forEach(autoAdvanceBye);
+    if (!roundMatches.every((m) => m.status === 'done' && m.winnerId)) {
+      return { complete: false, survivors: [] };
+    }
+
+    const survivors = [
+      ...((bucket[byeKey] && bucket[byeKey][roundNo]) || []),
+      ...roundMatches.map((m) => m.winnerId).filter(Boolean),
+    ];
+
+    if (survivors.length <= targetCount) {
+      return { complete: true, survivors };
+    }
+
+    const nextRoundExists = matches.some((m) => (m.round || 1) === roundNo + 1);
+    ensureReductionRound(phase, targetCount, labelPrefix, survivors, roundNo + 1);
+    if (!nextRoundExists) return { complete: false, survivors };
+    roundNo += 1;
+  }
 }
 
 function buildBracketFromDraw(playerIds) {
@@ -422,9 +586,15 @@ function buildBracketFromDraw(playerIds) {
   const matches = {};
 
   matches.prelim = [];
-  for (let i = 0; i < shuffled.length; i += 2) {
-    const idx = i / 2;
-    matches.prelim.push(makeMatch('prelim', idx, shuffled[i], shuffled[i + 1] || null, `初賽 ${idx + 1}`));
+  matches.prelimByes = {};
+  matches.prelimDirect = [];
+  const prelimTarget = getPrelimTarget(shuffled.length);
+  if (prelimTarget > 0 && shuffled.length > prelimTarget) {
+    const firstRound = createReductionRound('prelim', 1, shuffled, prelimTarget, '初賽');
+    matches.prelim = firstRound.matches;
+    matches.prelimByes[1] = firstRound.byes;
+  } else {
+    matches.prelimDirect = shuffled;
   }
 
   matches.quarter = Array.from({ length: 4 }, (_, i) =>
@@ -448,14 +618,18 @@ function setupRevivalBracket(eliminatedIds) {
   const prelimLosers = new Set(getPrelimLosers());
   const entrants = eliminatedIds.filter((id) => prelimLosers.has(id));
   const shuffled = shuffle(entrants);
-  const rev = [];
-  for (let i = 0; i < shuffled.length; i += 2) {
-    rev.push(makeMatch('revival', rev.length, shuffled[i], shuffled[i + 1] || null, `復活 R1-${Math.floor(i / 2) + 1}`));
+  tournamentState.matches.revival = [];
+  tournamentState.matches.revivalByes = {};
+  tournamentState.matches.revivalDirect = [];
+
+  if (shuffled.length <= 1) {
+    tournamentState.matches.revivalDirect = shuffled;
+    return;
   }
-  rev.push(makeMatch('revival', rev.length, null, null, '復活 R2-1'));
-  rev.push(makeMatch('revival', rev.length, null, null, '復活 R2-2'));
-  rev.push(makeMatch('revival', rev.length, null, null, '逆轉小羊決賽'));
-  tournamentState.matches.revival = rev;
+
+  const firstRound = createReductionRound('revival', 1, shuffled, 1, '復活');
+  tournamentState.matches.revival = firstRound.matches;
+  tournamentState.matches.revivalByes[1] = firstRound.byes;
 }
 
 function autoAdvanceBye(match) {
@@ -469,8 +643,11 @@ function autoAdvanceBye(match) {
   }
 }
 
-function advanceRevival() {
-  const rev = tournamentState.matches.revival;
+function isLegacyRevivalBracket(rev) {
+  return rev?.some((m) => m.label === '逆轉小羊決賽');
+}
+
+function advanceLegacyRevival(rev) {
   if (!rev || rev.length === 0) return;
 
   const r1 = rev.filter((m) => m.label.startsWith('復活 R1'));
@@ -511,6 +688,24 @@ function advanceRevival() {
   }
 }
 
+function advanceRevival() {
+  const rev = tournamentState.matches.revival;
+  if (!rev) return;
+
+  if (isLegacyRevivalBracket(rev)) {
+    advanceLegacyRevival(rev);
+    return;
+  }
+
+  const result = advanceReductionPhase('revival', 1, '復活');
+  if (result.complete && result.survivors[0]) {
+    tournamentState.revivalWinnerId = result.survivors[0];
+    if (tournamentState.matches.challenge) {
+      tournamentState.matches.challenge.p1Id = result.survivors[0];
+    }
+  }
+}
+
 function getPrelimLosers() {
   const prelim = tournamentState.matches.prelim;
   if (!prelim) return [];
@@ -525,15 +720,19 @@ function getPrelimLosersSoFar() {
 }
 
 function isQuarterComplete() {
-  const q = tournamentState.matches.quarter;
-  return q?.length === 4 && q.every((m) => m.status === 'done' && m.winnerId);
+  const active = getActiveQuarterMatches();
+  if (!active.length) return false;
+  return active.every((m) => m.status === 'done' && m.winnerId);
 }
 
 function isRevivalComplete() {
   const rev = tournamentState.matches.revival;
-  if (!rev?.length) return true;
-  const revFinal = rev.find((m) => m.label === '逆轉小羊決賽');
-  return revFinal?.status === 'done' && !!revFinal.winnerId;
+  if (isLegacyRevivalBracket(rev)) {
+    const revFinal = rev.find((m) => m.label === '逆轉小羊決賽');
+    return revFinal?.status === 'done' && !!revFinal.winnerId;
+  }
+  if (!rev?.length) return Boolean(tournamentState.revivalWinnerId || tournamentState.matches.revivalDirect?.length);
+  return Boolean(tournamentState.revivalWinnerId);
 }
 
 function needsRevivalPath() {
@@ -558,7 +757,7 @@ function isOfficialTopFourReady() {
 function getOfficialTopFour() {
   if (!isOfficialTopFourReady()) return null;
   const m = tournamentState.matches;
-  const topFour = m.quarter.map((x) => x.winnerId);
+  const topFour = getActiveQuarterMatches().map((x) => x.winnerId);
   if (tournamentState.revivalWinnerId && m.challenge?.status === 'done') {
     const challengedId = m.challenge.p2Id;
     const qIdx = topFour.findIndex((id) => id === challengedId);
@@ -587,25 +786,42 @@ function advanceWinners() {
   const m = tournamentState.matches;
   if (!m.prelim) return;
 
-  const prelimWinners = m.prelim.map((x) => x.winnerId).filter(Boolean);
+  const prelimResult = advanceReductionPhase('prelim', QUARTER_ENTRANTS, '初賽');
   const prelimLosers = getPrelimLosers();
 
   for (let i = 0; i < 4; i++) {
     if (m.quarter[i]) {
-      m.quarter[i].p1Id = prelimWinners[i * 2] || null;
-      m.quarter[i].p2Id = prelimWinners[i * 2 + 1] || null;
-      if (m.quarter[i].p1Id && !m.quarter[i].p2Id) {
-        m.quarter[i].winnerId = m.quarter[i].p1Id;
-        m.quarter[i].status = 'done';
-      } else if (!m.quarter[i].p1Id && !m.quarter[i].p2Id) {
-        m.quarter[i].status = 'pending';
-        m.quarter[i].winnerId = null;
+      if (!prelimResult.complete) {
+        if (m.quarter[i].status !== 'done') {
+          m.quarter[i].p1Id = null;
+          m.quarter[i].p2Id = null;
+          m.quarter[i].winnerId = null;
+          m.quarter[i].status = 'pending';
+          m.quarter[i].scores = null;
+          m.quarter[i].battles = null;
+          m.quarter[i].liveScores = null;
+        }
+        continue;
+      }
+
+      const quarterMatch = m.quarter[i];
+      const quarterWasPlayed = quarterMatch.status === 'done'
+        && (quarterMatch.scores || quarterMatch.liveScores);
+      quarterMatch.p1Id = prelimResult.survivors[i * 2] || null;
+      quarterMatch.p2Id = prelimResult.survivors[i * 2 + 1] || null;
+      if (!quarterMatch.p1Id && !quarterMatch.p2Id) {
+        if (!quarterWasPlayed) adminResetMatchFields(quarterMatch);
+      } else if (quarterMatch.p1Id && quarterMatch.p2Id) {
+        if (!quarterWasPlayed) adminResetMatchFields(quarterMatch);
+      } else {
+        // 複賽輪空不可自動完場，須等雙人對戰。
+        adminResetMatchFields(quarterMatch);
       }
     }
   }
 
   tournamentState.eliminatedIds = prelimLosers;
-  if (prelimLosers.length >= 2 && m.prelim.every((x) => x.status === 'done') && !m.revival?.length) {
+  if (prelimLosers.length >= 2 && prelimResult.complete && !m.revival?.length && !m.revivalDirect?.length) {
     setupRevivalBracket(prelimLosers);
   }
 
@@ -712,6 +928,7 @@ function renderVictorySchedulePanel() {
     btn.addEventListener('click', () => {
       hideVictorySchedulePanel();
       $('#victory-overlay').hidden = true;
+      document.body.classList.remove('victory-open');
       loadMatchToScoreboard(btn.dataset.matchId);
     });
   });
@@ -1043,10 +1260,6 @@ function drawRandomChallengeOpponent(forceRedraw = false) {
 function addPlayer(name) {
   const trimmed = (name || '').trim();
   if (!trimmed) return false;
-  if (tournamentState.players.length >= MAX_PLAYERS) {
-    alert(`每場最多 ${MAX_PLAYERS} 人`);
-    return false;
-  }
   if (tournamentState.players.some((p) => p.name === trimmed)) return false;
   tournamentState.players.push({ id: genId(), name: trimmed });
   persistSession();
@@ -1079,12 +1292,6 @@ function runDraw() {
   if (tournamentState.drawn && !confirm('重新抽籤會覆蓋現有賽程，確定？')) return;
 
   tournamentState.matches = buildBracketFromDraw(ids);
-  tournamentState.matches.prelim.forEach((m) => {
-    if (m.p1Id && !m.p2Id) {
-      m.winnerId = m.p1Id;
-      m.status = 'done';
-    }
-  });
   tournamentState.drawn = true;
   tournamentState.eliminatedIds = [];
   tournamentState.revivalWinnerId = null;
@@ -1092,7 +1299,7 @@ function runDraw() {
   advanceWinners();
   persistSession();
   renderTournamentUI();
-  addLog(`抽籤完成 — ${ids.length} 名選手，${tournamentState.matches.prelim.length} 場初賽`);
+  addLog(`抽籤完成 — ${ids.length} 名選手，初賽打至 ${Math.min(ids.length, QUARTER_ENTRANTS)} 強`);
   spawnConfetti(40);
 }
 
@@ -1103,8 +1310,36 @@ function resetTournament() {
   tournamentState.eliminatedIds = [];
   tournamentState.revivalWinnerId = null;
   tournamentState.activeMatchId = null;
+  if (typeof releaseMatchLock === 'function') releaseMatchLock();
   persistSession();
   renderTournamentUI();
+  addLog('已重設賽程（選手名單保留）');
+  if (typeof showToast === 'function') showToast('已重設賽程');
+}
+
+function resetRoster() {
+  if (!tournamentState.players.length && !tournamentState.drawn) {
+    if (typeof showToast === 'function') showToast('選手名單已是空的');
+    return;
+  }
+  const msg = tournamentState.drawn
+    ? '清空選手名單並一併清除抽籤與賽程？此操作無法復原。'
+    : '清空本場選手名單？';
+  if (!confirm(msg)) return;
+
+  tournamentState.players = [];
+  tournamentState.drawn = false;
+  tournamentState.matches = {};
+  tournamentState.eliminatedIds = [];
+  tournamentState.revivalWinnerId = null;
+  tournamentState.activeMatchId = null;
+  if (typeof releaseMatchLock === 'function') releaseMatchLock();
+  const bulk = $('#bulk-players');
+  if (bulk) bulk.value = '';
+  persistSession();
+  renderTournamentUI();
+  addLog('已重置選手名單');
+  if (typeof showToast === 'function') showToast('選手名單已清空');
 }
 
 async function loadMatchToScoreboard(matchId) {
@@ -1166,6 +1401,7 @@ async function loadMatchToScoreboard(matchId) {
   );
   hideVictorySchedulePanel();
   $('#victory-overlay').hidden = true;
+  document.body.classList.remove('victory-open');
 
   if (useCameraStandby && typeof enterCameraStandbyMode === 'function') {
     if (typeof switchAppView === 'function') switchAppView('camera');
@@ -1239,7 +1475,7 @@ function renderRosterList() {
     list.appendChild(li);
   });
 
-  if (count) count.textContent = `${tournamentState.players.length} / ${MAX_PLAYERS}`;
+  if (count) count.textContent = `${tournamentState.players.length} / 不限`;
 
   list.querySelectorAll('.roster-name-input').forEach((input) => {
     input.addEventListener('change', () => {
@@ -1265,7 +1501,7 @@ function escapeHtml(s) {
 }
 
 const PHASE_STYLES = {
-  prelim: { title: '初賽', sub: '16 → 8', cls: 'phase-prelim' },
+  prelim: { title: '初賽', sub: '打至 8 強', cls: 'phase-prelim' },
   revival: { title: '復活賽', sub: '僅初賽落敗者', cls: 'phase-revival' },
   quarter: { title: '複賽', sub: '8 → 4 · 落敗直接淘汰', cls: 'phase-quarter' },
   challenge: { title: '四強挑戰', sub: '小羊抽籤', cls: 'phase-challenge' },
@@ -1648,6 +1884,7 @@ function initTournament() {
   $('#btn-sync-use-remote')?.addEventListener('click', () => resolveSyncConflict(true));
   $('#btn-sync-keep-local')?.addEventListener('click', () => resolveSyncConflict(false));
   $('#btn-reset-bracket')?.addEventListener('click', resetTournament);
+  $('#btn-reset-roster')?.addEventListener('click', resetRoster);
 
   document.querySelectorAll('.tournament-tools-menu button').forEach((btn) => {
     btn.addEventListener('click', () => {

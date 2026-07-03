@@ -55,6 +55,14 @@ async function runEventChecklist() {
     hint: audioOk ? '已載入' : '請按「預熱倒數音效」或先點一次畫面',
   });
 
+  const finishSpin = document.getElementById('finish-audio-spin');
+  const finishOk = finishSpin && finishSpin.readyState >= 2;
+  items.push({
+    label: '得分語音',
+    ok: !!finishOk,
+    hint: finishOk ? 'Spin / Burst / Over / Xtreme 已載入' : '請先點一次畫面預熱音效',
+  });
+
   try {
     const r = await fetch('/cloud/status.json', { cache: 'no-store' });
     const d = await r.json();

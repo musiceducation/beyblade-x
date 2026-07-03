@@ -220,6 +220,19 @@ async function uploadReplayToServer(session, blob, attempt = 0) {
   replayState.serverUploadPending += 1;
   updateReplaySyncStatus();
   try {
+    // #region agent log
+    if (typeof portalDebugLog === 'function') {
+      portalDebugLog('H4', 'replay.js:223', 'lan replay upload started', {
+        replayId: session?.id || null,
+        attempt,
+        hasVideoId: Boolean(session?.videoId),
+        hasBlob: Boolean(blob),
+        blobSize: blob?.size || 0,
+        matchGroupId: session?.matchGroupId || null,
+        battleNum: session?.battleNum || null,
+      });
+    }
+    // #endregion
     await uploadReplayMetadata(session);
     if (blob && session.videoId) {
       await uploadReplayVideoBlob(session.id, blob);
@@ -227,6 +240,16 @@ async function uploadReplayToServer(session, blob, attempt = 0) {
     session.serverSynced = true;
     session.serverSyncError = null;
     saveReplayList();
+    // #region agent log
+    if (typeof portalDebugLog === 'function') {
+      portalDebugLog('H4', 'replay.js:246', 'lan replay upload succeeded', {
+        replayId: session.id,
+        hasVideoId: Boolean(session.videoId),
+        hasBlob: Boolean(blob),
+        blobSize: blob?.size || 0,
+      });
+    }
+    // #endregion
     if (typeof uploadReplayToSupabase === 'function' && isSupabaseSyncEnabled()) {
       await uploadReplayToSupabase(session, blob);
       saveReplayList();
@@ -240,6 +263,15 @@ async function uploadReplayToServer(session, blob, attempt = 0) {
     session.serverSynced = false;
     session.serverSyncError = String(err.message || err);
     saveReplayList();
+    // #region agent log
+    if (typeof portalDebugLog === 'function') {
+      portalDebugLog('H4', 'replay.js:264', 'lan replay upload failed', {
+        replayId: session?.id || null,
+        attempt,
+        error: session.serverSyncError,
+      });
+    }
+    // #endregion
     console.warn('Replay server upload failed', err);
   } finally {
     replayState.serverUploadPending = Math.max(0, replayState.serverUploadPending - 1);
@@ -748,6 +780,21 @@ async function finalizeReplaySession(session, finalScores, options = {}) {
   }
 
   const hasFinish = session.events.some((e) => e.type === 'finish');
+  // #region agent log
+  if (typeof portalDebugLog === 'function') {
+    portalDebugLog('H4', 'replay.js:765', 'replay finalize evaluated', {
+      replayId: session.id,
+      hasFinish,
+      hasBlob: Boolean(blob),
+      blobSize: blob?.size || 0,
+      discardVideo: Boolean(options.discardVideo),
+      matchEnd: Boolean(options.matchEnd),
+      battleNum: session.battleNum || null,
+      matchGroupId: session.matchGroupId || null,
+      eventCount: session.events.length,
+    });
+  }
+  // #endregion
   if (!hasFinish && !blob) return;
 
   if (blob) {
@@ -1280,7 +1327,7 @@ function hideReplayTheater() {
   finishTheaterRound();
   hideTheaterControls();
   if (typeof hideFinishAnnounce === 'function') hideFinishAnnounce();
-  if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+  if (typeof cancelFinishVoice === 'function') cancelFinishVoice();
   theater?.classList.remove('shake', 'shake-heavy', 'shake-go-shoot');
   if (tv) {
     detachTheaterVideoSync(tv);
