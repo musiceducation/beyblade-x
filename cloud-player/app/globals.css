@@ -36,18 +36,28 @@ body {
   flex-direction: column;
   background: rgba(7, 11, 18, 0.6);
   box-shadow: 0 0 0 1px var(--border);
+  overflow-x: clip;
+}
+
+.player-sticky-shell {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background:
+    linear-gradient(180deg, rgba(255, 214, 10, 0.07), transparent 70%),
+    rgba(7, 11, 18, 0.94);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
 }
 
 /* ── Header ── */
 .player-header {
   padding: 0.85rem 1rem 0.75rem;
   padding-top: max(0.85rem, env(safe-area-inset-top));
-  border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(255, 214, 10, 0.07), transparent 70%);
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  backdrop-filter: blur(12px);
+  border-bottom: none;
+  background: transparent;
+  position: relative;
+  z-index: 1;
 }
 
 .player-header-top {
@@ -216,12 +226,10 @@ body {
 /* ── Tabs ── */
 .player-tabs {
   display: flex;
-  position: sticky;
-  top: calc(env(safe-area-inset-top) + 7.5rem);
-  z-index: 9;
-  border-bottom: 1px solid var(--border);
-  background: rgba(7, 11, 18, 0.92);
-  backdrop-filter: blur(10px);
+  position: relative;
+  z-index: 1;
+  border-bottom: none;
+  background: transparent;
 }
 
 .player-tab {
@@ -524,6 +532,90 @@ body {
   color: var(--muted);
 }
 
+.schedule-prelim-board {
+  display: flex;
+  gap: 0.65rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+  margin: 0 -0.15rem;
+  padding-inline: 0.15rem;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+}
+
+.schedule-prelim-board--solo {
+  margin-top: 0.15rem;
+}
+
+.schedule-prelim-column {
+  flex: 0 0 min(17rem, 82vw);
+  scroll-snap-align: start;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 0.55rem;
+}
+
+.schedule-prelim-head {
+  display: grid;
+  gap: 0.15rem;
+  margin-bottom: 0.45rem;
+}
+
+.schedule-prelim-head h4 {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.schedule-prelim-sub,
+.schedule-prelim-progress {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.schedule-prelim-progress {
+  justify-self: end;
+}
+
+.schedule-bye-list {
+  list-style: none;
+  margin: 0.35rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.schedule-bye-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.35rem 0.5rem;
+  align-items: center;
+  padding: 0.55rem 0.65rem;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.schedule-bye-label {
+  font-size: 0.65rem;
+  color: var(--muted);
+}
+
+.schedule-bye-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.schedule-bye-hint {
+  font-size: 0.65rem;
+  color: var(--gold);
+}
+
 /* ── Match cards ── */
 .match-card-list {
   display: flex;
@@ -559,14 +651,17 @@ body {
 .match-card-head {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.5rem;
   margin-bottom: 0.45rem;
+  flex-wrap: wrap;
 }
 
 .match-card-phase {
   font-size: 0.7rem;
   color: var(--muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .match-card-status {
@@ -592,6 +687,12 @@ body {
   align-items: center;
   gap: 0.5rem;
   font-size: 0.88rem;
+  min-width: 0;
+}
+
+.match-card-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .match-card-slot--red .match-card-name { color: var(--text); }
@@ -648,6 +749,38 @@ body {
   background: #000;
   border: 1px solid var(--border);
   box-shadow: var(--header-shadow);
+}
+
+.replay-video-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 10rem;
+  padding: 1.25rem;
+  text-align: center;
+  background: var(--bg-card);
+  color: var(--text);
+}
+
+.replay-video-fallback-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.replay-video-fallback-link {
+  margin-top: 0.25rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 214, 10, 0.35);
+  background: rgba(255, 214, 10, 0.1);
+  color: var(--gold);
+  text-decoration: none;
+  font-size: 0.82rem;
+  font-weight: 600;
 }
 
 .player-replay-no-video {
@@ -1476,6 +1609,100 @@ body.portal-replay-theater-active {
   color: #ff453a;
 }
 
+/* ── Phone ── */
+@media (max-width: 767px) {
+  .player-tab {
+    min-height: 44px;
+    padding-inline: 0.25rem;
+    font-size: 0.82rem;
+  }
+
+  .player-notify-btn,
+  .player-search-clear,
+  .player-refresh {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .schedule-bye-item {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "label hint"
+      "name name";
+  }
+
+  .schedule-bye-label { grid-area: label; }
+  .schedule-bye-name { grid-area: name; }
+  .schedule-bye-hint { grid-area: hint; justify-self: end; }
+
+  .player-next-alert {
+    font-size: 0.78rem;
+    word-break: break-word;
+  }
+
+  .player-replay-stage {
+    position: relative;
+    top: auto;
+    z-index: 1;
+  }
+
+  .player-replay-video {
+    max-height: min(48vh, 280px);
+  }
+
+  .player-replay-footer {
+    gap: 0.65rem;
+  }
+
+  .player-replay-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .player-replay-action,
+  .replay-group-batch-play,
+  .replay-group-batch-dl {
+    min-height: 44px;
+  }
+
+  .replay-player-progress {
+    flex-wrap: wrap;
+  }
+
+  .replay-player-scrubber {
+    width: 100%;
+    min-height: 28px;
+  }
+
+  .btn-replay-player-play {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .portal-replay-hud {
+    bottom: calc(8.25rem + env(safe-area-inset-bottom));
+    padding-inline: 0.65rem;
+  }
+
+  .portal-replay-fx {
+    bottom: calc(8.25rem + env(safe-area-inset-bottom));
+  }
+
+  .portal-replay-theater-chrome {
+    padding-inline: 0.5rem;
+  }
+
+  .replay-group-meta-row {
+    gap: 0.3rem;
+  }
+
+  .replay-group-score {
+    margin-left: 0;
+    width: 100%;
+  }
+}
+
 /* ── Desktop ── */
 @media (min-width: 768px) {
   .portal-shell {
@@ -1486,7 +1713,12 @@ body.portal-replay-theater-active {
     overflow: hidden;
   }
 
-  .player-tabs { top: 0; position: sticky; }
+  .player-tabs { top: 0; position: relative; }
+
+  .player-sticky-shell {
+    position: sticky;
+    top: 0;
+  }
 
   .player-replay-layout.has-player {
     display: grid;

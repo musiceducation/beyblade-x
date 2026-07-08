@@ -7,8 +7,12 @@ import {
   PhaseFilter,
   PHASE_LIST,
   getAllMatches,
+  getPrelimRoundColumns,
+  getQuarterByePlayerIds,
   groupMatchesByPhase,
   matchInvolvesName,
+  playerName,
+  scheduleHasVisibleContent,
   sessionStats,
   sortMatches,
 } from '@/lib/tournament';
@@ -37,6 +41,12 @@ export default function ScheduleTab({ sessionData, sessionLabel, search }: Props
   }, [matches, sessionData, search, phaseFilter]);
 
   const grouped = useMemo(() => groupMatchesByPhase(filtered), [filtered]);
+  const prelimColumns = useMemo(() => getPrelimRoundColumns(sessionData), [sessionData]);
+  const quarterByes = useMemo(() => getQuarterByePlayerIds(sessionData), [sessionData]);
+  const hasVisibleSchedule = useMemo(
+    () => scheduleHasVisibleContent(sessionData, phaseFilter, filtered, prelimColumns, search),
+    [sessionData, phaseFilter, filtered, prelimColumns, search],
+  );
 
   const phasesWithMatches = useMemo(() => {
     const set = new Set(matches.map((m) => m.phase));
@@ -95,7 +105,7 @@ export default function ScheduleTab({ sessionData, sessionLabel, search }: Props
         </div>
       )}
 
-      {filtered.length === 0 ? (
+      { !hasVisibleSchedule ? (
         <p className="portal-empty portal-empty--inline">
           {search ? '找不到相關對戰' : '此階段尚無賽程'}
         </p>
@@ -107,42 +117,180 @@ export default function ScheduleTab({ sessionData, sessionLabel, search }: Props
                 <h3>{label}</h3>
                 <span>{phaseMatches.filter((m) => m.status === 'done').length}/{phaseMatches.length}</span>
               </header>
-              <ul className="match-card-list">
-                {phaseMatches.map((m) => {
-                  const isActive = m.id === sessionData.activeMatchId;
-                  const highlight = Boolean(search && matchInvolvesName(m, sessionData, search));
-                  return (
-                    <li key={m.id} ref={isActive ? activeRef : undefined}>
-                      <MatchCard
-                        match={m}
-                        data={sessionData}
-                        activeMatchId={sessionData.activeMatchId}
-                        highlight={highlight}
-                      />
-                    </li>
-                  );
-                })}
-              </ul>
+              {phase === 'prelim' && prelimColumns.length > 0 ? (
+                <div className="schedule-prelim-board">
+                  {prelimColumns.map((column) => {
+                    const visibleMatches = search
+                      ? column.matches.filter((m) => matchInvolvesName(m, sessionData, search))
+                      : column.matches;
+                    const visibleByes = search
+                      ? column.byeIds.filter((id) => playerName(sessionData, id).toLowerCase().includes(search.toLowerCase()))
+                      : column.byeIds;
+                    if (!visibleMatches.length && !visibleByes.length) return null;
+                    const done = visibleMatches.filter((m) => m.status === 'done').length;
+                    return (
+                      <section key={column.roundNo} className={`schedule-prelim-column schedule-prelim-column--r${column.roundNo}`}>
+                        <header className="schedule-prelim-head">
+                          <h4>{column.title}</h4>
+                          <span className="schedule-prelim-sub">{column.sub}</span>
+                          <span className="schedule-prelim-progress">
+                            {visibleMatches.length ? `${done}/${visibleMatches.length}` : (visibleByes.length ? '輪空' : '—')}
+                          </span>
+                        </header>
+                        {visibleMatches.length > 0 && (
+                          <ul className="match-card-list">
+                            {visibleMatches.map((m) => {
+                              const isActive = m.id === sessionData.activeMatchId;
+                              const highlight = Boolean(search && matchInvolvesName(m, sessionData, search));
+                              return (
+                                <li key={m.id} ref={isActive ? activeRef : undefined}>
+                                  <MatchCard
+                                    match={m}
+                                    data={sessionData}
+                                    activeMatchId={sessionData.activeMatchId}
+                                    highlight={highlight}
+                                  />
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                        {visibleByes.length > 0 && (
+                          <ul className="schedule-bye-list" aria-label={`${column.title} 輪空`}>
+                            {visibleByes.map((id) => (
+                              <li key={`${column.roundNo}-${id}`} className="schedule-bye-item">
+                                <span className="schedule-bye-label">R{column.roundNo} 輪空</span>
+                                <span className="schedule-bye-name">{playerName(sessionData, id)}</span>
+                                <span className="schedule-bye-hint">{column.byeHint}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </section>
+                    );
+                  })}
+                </div>
+              ) : (
+                <>
+                  <ul className="match-card-list">
+                    {phaseMatches.map((m) => {
+                      const isActive = m.id === sessionData.activeMatchId;
+                      const highlight = Boolean(search && matchInvolvesName(m, sessionData, search));
+                      return (
+                        <li key={m.id} ref={isActive ? activeRef : undefined}>
+                          <MatchCard
+                            match={m}
+                            data={sessionData}
+                            activeMatchId={sessionData.activeMatchId}
+                            highlight={highlight}
+                          />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {phase === 'quarter' && quarterByes.length > 0 && (
+                    <ul className="schedule-bye-list" aria-label="複賽輪空">
+                      {quarterByes
+                        .filter(({ playerId }) => !search || playerName(sessionData, playerId).toLowerCase().includes(search.toLowerCase()))
+                        .map(({ slotIndex, playerId }) => (
+                          <li key={`quarter-bye-${slotIndex}`} className="schedule-bye-item">
+                            <span className="schedule-bye-label">複賽 {slotIndex + 1} 輪空</span>
+                            <span className="schedule-bye-name">{playerName(sessionData, playerId)}</span>
+                            <span className="schedule-bye-hint">→ 準決賽</span>
+                          </li>
+                        ))}
+                    </ul>
+                  )}
+                </>
+              )}
             </section>
           ))}
         </div>
-      ) : (
-        <ul className="match-card-list">
-          {filtered.map((m) => {
-            const isActive = m.id === sessionData.activeMatchId;
-            const highlight = Boolean(search && matchInvolvesName(m, sessionData, search));
+      ) : phaseFilter === 'prelim' && prelimColumns.length > 0 ? (
+        <div className="schedule-prelim-board schedule-prelim-board--solo">
+          {prelimColumns.map((column) => {
+            const visibleMatches = search
+              ? column.matches.filter((m) => matchInvolvesName(m, sessionData, search))
+              : column.matches;
+            const visibleByes = search
+              ? column.byeIds.filter((id) => playerName(sessionData, id).toLowerCase().includes(search.toLowerCase()))
+              : column.byeIds;
+            if (!visibleMatches.length && !visibleByes.length) return null;
+            const done = visibleMatches.filter((m) => m.status === 'done').length;
             return (
-              <li key={m.id} ref={isActive ? activeRef : undefined}>
-                <MatchCard
-                  match={m}
-                  data={sessionData}
-                  activeMatchId={sessionData.activeMatchId}
-                  highlight={highlight}
-                />
-              </li>
+              <section key={column.roundNo} className={`schedule-prelim-column schedule-prelim-column--r${column.roundNo}`}>
+                <header className="schedule-prelim-head">
+                  <h4>{column.title}</h4>
+                  <span className="schedule-prelim-sub">{column.sub}</span>
+                  <span className="schedule-prelim-progress">
+                    {visibleMatches.length ? `${done}/${visibleMatches.length}` : (visibleByes.length ? '輪空' : '—')}
+                  </span>
+                </header>
+                {visibleMatches.length > 0 && (
+                  <ul className="match-card-list">
+                    {visibleMatches.map((m) => {
+                      const isActive = m.id === sessionData.activeMatchId;
+                      const highlight = Boolean(search && matchInvolvesName(m, sessionData, search));
+                      return (
+                        <li key={m.id} ref={isActive ? activeRef : undefined}>
+                          <MatchCard
+                            match={m}
+                            data={sessionData}
+                            activeMatchId={sessionData.activeMatchId}
+                            highlight={highlight}
+                          />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                {visibleByes.length > 0 && (
+                  <ul className="schedule-bye-list" aria-label={`${column.title} 輪空`}>
+                    {visibleByes.map((id) => (
+                      <li key={`${column.roundNo}-${id}`} className="schedule-bye-item">
+                        <span className="schedule-bye-label">R{column.roundNo} 輪空</span>
+                        <span className="schedule-bye-name">{playerName(sessionData, id)}</span>
+                        <span className="schedule-bye-hint">{column.byeHint}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
             );
           })}
-        </ul>
+        </div>
+      ) : (
+        <>
+          <ul className="match-card-list">
+            {filtered.map((m) => {
+              const isActive = m.id === sessionData.activeMatchId;
+              const highlight = Boolean(search && matchInvolvesName(m, sessionData, search));
+              return (
+                <li key={m.id} ref={isActive ? activeRef : undefined}>
+                  <MatchCard
+                    match={m}
+                    data={sessionData}
+                    activeMatchId={sessionData.activeMatchId}
+                    highlight={highlight}
+                  />
+                </li>
+              );
+            })}
+          </ul>
+          {phaseFilter === 'quarter' && quarterByes.length > 0 && (
+            <ul className="schedule-bye-list" aria-label="複賽輪空">
+              {quarterByes
+                .filter(({ playerId }) => !search || playerName(sessionData, playerId).toLowerCase().includes(search.toLowerCase()))
+                .map(({ slotIndex, playerId }) => (
+                  <li key={`quarter-bye-${slotIndex}`} className="schedule-bye-item">
+                    <span className="schedule-bye-label">複賽 {slotIndex + 1} 輪空</span>
+                    <span className="schedule-bye-name">{playerName(sessionData, playerId)}</span>
+                    <span className="schedule-bye-hint">→ 準決賽</span>
+                  </li>
+                ))}
+            </ul>
+          )}
+        </>
       )}
     </section>
   );

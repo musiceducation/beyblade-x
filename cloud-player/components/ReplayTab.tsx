@@ -20,9 +20,10 @@ import {
   downloadCloudReplay,
 } from '@/lib/replay';
 import { filterReplaysBySession } from '@/lib/tournament';
-import { replayVideoUrl } from '@/lib/supabase';
+import { getReplayVideoUrls, preferMp4Replay, replayVideoUrl } from '@/lib/supabase';
 import ReplayPlayerBar from '@/components/ReplayPlayerBar';
 import ReplayTheater, { ReplayTheaterMode } from '@/components/ReplayTheater';
+import ReplayVideo from '@/components/ReplayVideo';
 
 type Props = {
   replays: ArenaReplayRow[];
@@ -140,7 +141,7 @@ export default function ReplayTab({
       const meta = replayMeta(r);
       await downloadCloudReplay(
         r,
-        replayVideoUrl(r.id),
+        getReplayVideoUrls(r.id)[0] || replayVideoUrl(r.id),
         { p1Name: meta?.p1Name, p2Name: meta?.p2Name, battleNum: r.battle_num ?? meta?.battleNum },
         () => {},
       );
@@ -192,16 +193,12 @@ export default function ReplayTab({
         <div className="player-replay-stage" ref={stageRef}>
           {activeReplay.has_video ? (
             <div className="player-replay-video-wrap">
-              <div className="replay-player-viewport" ref={viewportRef}>
-                <video
-                  key={activeReplay.id}
-                  ref={videoRef}
-                  className="player-replay-video"
-                  playsInline
-                  preload="metadata"
-                  src={replayVideoUrl(activeReplay.id) || undefined}
-                />
-              </div>
+              <ReplayVideo
+                replayId={activeReplay.id}
+                className="player-replay-video"
+                videoRef={videoRef}
+                viewportRef={viewportRef}
+              />
               <ReplayPlayerBar videoRef={videoRef} viewportRef={viewportRef} />
             </div>
           ) : (
@@ -287,7 +284,7 @@ export default function ReplayTab({
                     disabled={downloadStatus === 'downloading'}
                     onClick={() => downloadCloudReplay(
                       activeReplay,
-                      replayVideoUrl(activeReplay.id),
+                      getReplayVideoUrls(activeReplay.id)[0] || replayVideoUrl(activeReplay.id),
                       {
                         p1Name: activeMeta?.p1Name,
                         p2Name: activeMeta?.p2Name,
@@ -366,17 +363,20 @@ export default function ReplayTab({
                   const meta = replayMeta(r);
                   const delta = replayBattleDelta(meta);
                   const isActive = activeReplayId === r.id;
-                  const videoUrl = r.has_video ? replayVideoUrl(r.id) : null;
+                  const videoUrls = r.has_video ? getReplayVideoUrls(r.id) : [];
+                  const thumbUrl = r.has_video
+                    ? (preferMp4Replay() ? videoUrls[0] : videoUrls.find((u) => u.endsWith('.webm')) || videoUrls[0])
+                    : null;
 
                   return (
                     <li key={r.id} className={`replay-round-item${isActive ? ' is-active' : ''}`}>
-                      {videoUrl ? (
+                      {thumbUrl ? (
                         <video
                           className="replay-round-thumb"
                           preload="metadata"
                           muted
                           playsInline
-                          src={`${videoUrl}#t=0.3`}
+                          src={`${thumbUrl}#t=0.3`}
                           aria-hidden="true"
                         />
                       ) : (

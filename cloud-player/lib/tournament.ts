@@ -16,23 +16,225 @@ export const PHASE_LIST = [
 
 export type PhaseFilter = 'all' | (typeof PHASE_LIST)[number];
 
+export type PrelimRoundColumn = {
+  roundNo: number;
+  title: string;
+  sub: string;
+  matches: Match[];
+  byeIds: string[];
+  byeHint: string;
+};
+
+const QUARTER_ENTRANTS = 8;
+
+function prelimMatches(data: SessionData | null): Match[] {
+  const prelim = data?.matches?.prelim;
+  return Array.isArray(prelim) ? prelim : [];
+}
+
+function prelimByeMap(data: SessionData | null): Record<string, string[]> {
+  const raw = data?.matches?.prelimByes;
+  if (!raw || Array.isArray(raw)) return {};
+  return raw as Record<string, string[]>;
+}
+
+export function getMaxPrelimRound(data: SessionData | null): number {
+  let max = 1;
+  prelimMatches(data).forEach((m) => {
+    max = Math.max(max, m.round || 1);
+  });
+  Object.keys(prelimByeMap(data)).forEach((round) => {
+    max = Math.max(max, Number(round) || 1);
+  });
+  return Math.min(4, max);
+}
+
+function prelimNeedsRound2(data: SessionData | null): boolean {
+  if (getMaxPrelimRound(data) >= 2) return true;
+  const r1 = prelimMatches(data).filter((m) => (m.round || 1) === 1);
+  const r1Byes = prelimByeMap(data)[1] || [];
+  if (!r1.length) return false;
+  return r1Byes.length + r1.length > QUARTER_ENTRANTS;
+}
+
+function prelimRoundHasFollowUp(data: SessionData | null, roundNo: number): boolean {
+  return roundNo < getMaxPrelimRound(data) || (roundNo === 1 && prelimNeedsRound2(data));
+}
+
+export function getPrelimByePlayerIds(data: SessionData | null, roundNo: number): string[] {
+  const ids = (prelimByeMap(data)[String(roundNo)] || []).filter(Boolean);
+  if (roundNo !== 1) return ids;
+
+  const inLaterRound = new Set<string>();
+  prelimMatches(data).forEach((m) => {
+    if ((m.round || 1) >= 2) {
+      if (m.p1Id) inLaterRound.add(m.p1Id);
+      if (m.p2Id) inLaterRound.add(m.p2Id);
+    }
+  });
+  Object.entries(prelimByeMap(data)).forEach(([round, roundByes]) => {
+    if (Number(round) >= 2) roundByes.forEach((id) => { if (id) inLaterRound.add(id); });
+  });
+  return ids.filter((id) => !inLaterRound.has(id));
+}
+
+export function getPrelimRoundColumns(data: SessionData | null): PrelimRoundColumn[] {
+  const maxRound = getMaxPrelimRound(data);
+  const columns: PrelimRoundColumn[] = [];
+
+  for (let roundNo = 1; roundNo <= maxRound; roundNo += 1) {
+    const matches = prelimMatches(data).filter((m) => (m.round || 1) === roundNo);
+    const byeIds = getPrelimByePlayerIds(data, roundNo);
+    const waiting = roundNo > 1
+      && roundNo <= maxRound
+      && !matches.length
+      && getPrelimByePlayerIds(data, roundNo - 1).length > 0
+      && !prelimMatches(data).some((m) => (m.round || 1) >= roundNo);
+
+    if (!matches.length && !byeIds.length && !waiting) continue;
+
+    columns.push({
+      roundNo,
+      title: `初賽 R${roundNo}`,
+      sub: roundNo < maxRound
+        ? `第 ${roundNo} 輪 · 輪空進 R${roundNo + 1}`
+        : `第 ${roundNo} 輪 · 晉級複賽`,
+      matches,
+      byeIds,
+      byeHint: prelimRoundHasFollowUp(data, roundNo) ? `→ R${roundNo + 1}` : '→ 複賽',
+    });
+  }
+
+  return columns;
+}
+
 export function playerName(data: SessionData | null, id?: string | null) {
   if (!id || !data?.players) return '待定';
   return data.players.find((p) => p.id === id)?.name || '待定';
 }
 
+function quarterMatches(data: SessionData | null): Match[] {
+  const quarter = data?.matches?.quarter;
+  return Array.isArray(quarter) ? quarter : [];
+}
+
+export function getQuarterSlotChampion(slot: Match | null | undefined): string | null {
+  if (!slot) return null;
+  if (slot.status === 'done' && slot.winnerId) return slot.winnerId;
+  if (slot.p1Id && !slot.p2Id) return slot.p1Id;
+  if (!slot.p1Id && slot.p2Id) return slot.p2Id;
+  return null;
+}
+
+export function getQuarterByePlayerIds(data: SessionData | null): { slotIndex: number; playerId: string }[] {
+  return quarterMatches(data)
+    .map((slot, slotIndex) => {
+      if (slot.status === 'done') return null;
+      if (slot.p1Id && !slot.p2Id) return { slotIndex, playerId: slot.p1Id };
+      if (!slot.p1Id && slot.p2Id) return { slotIndex, playerId: slot.p2Id };
+      return null;
+    })
+    .filter(Boolean) as { slotIndex: number; playerId: string }[];
+}
+
+function isQuarterComplete(data: SessionData | null): boolean {
+  const dualMatches = quarterMatches(data).filter((m) => m.p1Id && m.p2Id);
+  const singleSlots = quarterMatches(data).filter((m) => (m.p1Id && !m.p2Id) || (!m.p1Id && m.p2Id));
+  if (!dualMatches.length && !singleSlots.length) return false;
+  return dualMatches.every((m) => m.status === 'done' && m.winnerId);
+}
+
+function isRevivalComplete(data: SessionData | null): boolean {
+  if (!data?.matches) return false;
+  if (data.revivalWinnerId) return true;
+  const rev = data.matches.revival;
+  if (!Array.isArray(rev) || !rev.length) return false;
+  return rev.some((m) => m.label === '逆轉小羊決賽' && m.status === 'done' && m.winnerId)
+    || Boolean(data.revivalWinnerId);
+}
+
+function needsRevivalPath(data: SessionData | null): boolean {
+  const rev = data?.matches?.revival;
+  return Array.isArray(rev) && rev.length > 0;
+}
+
+function isChallengeComplete(data: SessionData | null): boolean {
+  if (!data?.revivalWinnerId) return true;
+  const ch = data.matches?.challenge as Match | undefined;
+  return ch?.status === 'done' && !!ch.winnerId;
+}
+
+export function isOfficialTopFourReady(data: SessionData | null): boolean {
+  if (!isQuarterComplete(data)) return false;
+  if (needsRevivalPath(data)) {
+    if (!isRevivalComplete(data)) return false;
+    if (data?.revivalWinnerId && !isChallengeComplete(data)) return false;
+  }
+  return true;
+}
+
+export function getOfficialTopFour(data: SessionData | null): (string | null)[] | null {
+  if (!isOfficialTopFourReady(data)) return null;
+  const quarters = quarterMatches(data);
+  const topFour = quarters.slice(0, 4).map(getQuarterSlotChampion);
+  const challenge = data?.matches?.challenge as Match | undefined;
+
+  if (data?.revivalWinnerId && challenge?.status === 'done') {
+    const challengedId = challenge.p2Id;
+    const qIdx = quarters.findIndex((q) =>
+      q.winnerId === challengedId || q.p1Id === challengedId || q.p2Id === challengedId
+    );
+    if (qIdx >= 0) topFour[qIdx] = challenge.winnerId || null;
+  }
+
+  return topFour;
+}
+
 export function getAllMatches(data: SessionData | null): Match[] {
   const m = data?.matches;
-  if (!m?.prelim) return [];
+  if (!m) return [];
   const prelim = Array.isArray(m.prelim) ? m.prelim : [];
   return [
     ...prelim,
-    ...((m.quarter as Match[]) || []),
+    ...quarterMatches(data),
     ...((m.revival as Match[]) || []),
     ...(m.challenge ? [m.challenge as Match] : []),
     ...((m.semi as Match[]) || []),
     ...(m.final ? [m.final as Match] : []),
   ];
+}
+
+export function prelimColumnHasVisibleContent(
+  data: SessionData | null,
+  column: PrelimRoundColumn,
+  search: string,
+): boolean {
+  if (!search) return column.matches.length > 0 || column.byeIds.length > 0;
+  const q = search.toLowerCase();
+  return column.matches.some((m) => matchInvolvesName(m, data, search))
+    || column.byeIds.some((id) => playerName(data, id).toLowerCase().includes(q));
+}
+
+export function scheduleHasVisibleContent(
+  data: SessionData | null,
+  phaseFilter: PhaseFilter,
+  filtered: Match[],
+  prelimColumns: PrelimRoundColumn[],
+  search: string,
+): boolean {
+  const prelimVisible = prelimColumns.some((column) =>
+    prelimColumnHasVisibleContent(data, column, search)
+  );
+
+  if (phaseFilter === 'prelim') return prelimVisible;
+  if (phaseFilter === 'quarter') {
+    const visibleQuarterByes = getQuarterByePlayerIds(data).some(({ playerId }) =>
+      !search || playerName(data, playerId).toLowerCase().includes(search.toLowerCase())
+    );
+    return filtered.length > 0 || visibleQuarterByes;
+  }
+  if (phaseFilter === 'all') return filtered.length > 0 || prelimVisible;
+  return filtered.length > 0;
 }
 
 export function matchInvolvesName(match: Match, data: SessionData | null, query: string) {
@@ -63,9 +265,14 @@ export function matchStatusLabel(status: ReturnType<typeof matchStatus>) {
 }
 
 export function sortMatches(matches: Match[]) {
-  return [...matches].sort(
-    (a, b) => (PHASE_ORDER[a.phase] ?? 9) - (PHASE_ORDER[b.phase] ?? 9),
-  );
+  return [...matches].sort((a, b) => {
+    const phaseDiff = (PHASE_ORDER[a.phase] ?? 9) - (PHASE_ORDER[b.phase] ?? 9);
+    if (phaseDiff !== 0) return phaseDiff;
+    if (a.phase === 'prelim' && b.phase === 'prelim') {
+      return (a.round || 1) - (b.round || 1);
+    }
+    return 0;
+  });
 }
 
 export function groupMatchesByPhase(matches: Match[]) {
@@ -141,8 +348,11 @@ export function computeAwards(data: SessionData | null): SessionAwards | null {
   const champion = playerName(data, fin.winnerId);
   const runnerId = fin.winnerId === fin.p1Id ? fin.p2Id : fin.p1Id;
   const runnerUp = playerName(data, runnerId);
+  const officialTopFour = getOfficialTopFour(data)?.filter(Boolean) as string[] | null;
   const semis = ((data.matches.semi as Match[]) || []).map((m) => m.winnerId).filter(Boolean);
-  const top4Ids = [...new Set([...semis, fin.p1Id, fin.p2Id].filter(Boolean))] as string[];
+  const top4Ids = officialTopFour?.length
+    ? officialTopFour
+    : [...new Set([...semis, fin.p1Id, fin.p2Id].filter(Boolean))] as string[];
   const top4 = top4Ids.map((id) => playerName(data, id));
   return { champion, runnerUp, top4 };
 }

@@ -23,7 +23,7 @@ import {
   scoresAtVideoTime,
 } from '@/lib/replay';
 import { ReplayParticleFx, triggerReplayFinishFx } from '@/lib/replayFx';
-import { replayVideoUrl } from '@/lib/supabase';
+import { getReplayVideoUrls } from '@/lib/supabase';
 import ReplayPlayerBar from '@/components/ReplayPlayerBar';
 
 export type ReplayTheaterMode = 'single' | 'match';
@@ -161,7 +161,7 @@ export default function ReplayTheater({
     roundMeta: ReturnType<typeof replayMeta>,
     startScores: [number, number],
     roundLabel: string,
-    url: string,
+    url: string | string[],
     video: HTMLVideoElement,
   ) => {
     const videoDuration = await prepareReplayVideo(video, url);
@@ -230,10 +230,10 @@ export default function ReplayTheater({
     setHasVideo(!!r.has_video);
 
     const video = videoRef.current;
-    const url = r.has_video ? replayVideoUrl(r.id) : null;
+    const urls = r.has_video ? getReplayVideoUrls(r.id) : [];
 
-    if (url && video) {
-      await playRoundWithVideo(r, roundMeta, startScores, roundLabel, url, video);
+    if (urls.length && video) {
+      await playRoundWithVideo(r, roundMeta, startScores, roundLabel, urls, video);
     } else {
       setShowChrome(false);
       if (video) {

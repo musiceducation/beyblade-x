@@ -107,6 +107,7 @@ export default function PlayerPortal() {
 
   return (
     <div className="portal-shell">
+      <div className="player-sticky-shell">
       <header className="player-header">
         <div className="player-header-top">
           <div className="player-brand">
@@ -218,6 +219,7 @@ export default function PlayerPortal() {
           </button>
         ))}
       </nav>
+      </div>
 
       <main className="player-main">
         {nextForSearch && (

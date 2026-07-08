@@ -799,6 +799,8 @@ async function finalizeReplaySession(session, finalScores, options = {}) {
 
   if (blob) {
     session.videoId = session.id;
+    session.videoMime = blob.type || 'video/webm';
+    session.videoExt = blob.type?.includes('mp4') ? 'mp4' : 'webm';
     try {
       await saveReplayVideo(session.id, blob);
     } catch (err) {

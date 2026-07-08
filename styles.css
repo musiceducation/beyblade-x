@@ -792,8 +792,8 @@ body.launch-active.launch-live .scoreboard {
   --hud-inset-l: max(3.35rem, calc(env(safe-area-inset-left) + 2.75rem));
   --hud-inset-r: max(3.35rem, calc(env(safe-area-inset-right) + 2.75rem));
   --hud-name-top: max(2.7rem, calc(env(safe-area-inset-top) + 2.2rem));
-  --hud-score-top: max(7.4rem, calc(env(safe-area-inset-top) + 6.65rem));
-  --hud-rail-top: max(13rem, calc(env(safe-area-inset-top) + 12rem));
+  --hud-score-top: max(8.15rem, calc(env(safe-area-inset-top) + 7.4rem));
+  --hud-rail-top: max(13.75rem, calc(env(safe-area-inset-top) + 12.75rem));
   --hud-rail-bottom: max(6.85rem, calc(env(safe-area-inset-bottom) + 5.85rem));
   --hud-btn-bottom: max(0.85rem, env(safe-area-inset-bottom));
 }
@@ -958,7 +958,7 @@ body.launch-active.launch-live .player-header {
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-bottom: none;
   border-radius: 14px 14px 0 0;
-  overflow: hidden;
+  overflow: visible;
   box-shadow:
     0 10px 32px rgba(0, 0, 0, 0.45),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
@@ -1008,17 +1008,20 @@ body.launch-active.launch-live .player-badge {
 }
 
 body.launch-active.launch-live .player-name {
-  font-family: 'Bebas Neue', var(--font-display), sans-serif;
+  font-family: var(--font-display), 'PingFang TC', 'Heiti TC', 'Microsoft JhengHei', 'Noto Sans TC', sans-serif;
   font-size: clamp(1.85rem, 5.2vw, 2.75rem);
-  font-weight: 400;
-  letter-spacing: 0.07em;
-  padding: 0.1rem 0.75rem 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.35;
+  padding: 0.15rem 0.75rem 0.7rem;
   border: none;
   background: transparent;
   color: #fff;
   text-shadow: 0 2px 12px rgba(0, 0, 0, 0.55);
   width: 100%;
+  height: auto;
   text-align: inherit;
+  overflow: visible;
 }
 
 body.launch-active.launch-live .player-red .player-name {
@@ -3983,6 +3986,48 @@ body.replay-theater-active .finish-announce {
   font-weight: 700;
 }
 
+.bracket-bye-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem 0.65rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.bracket-bye-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  background: rgba(90, 200, 250, 0.08);
+  border: 1px dashed rgba(90, 200, 250, 0.35);
+}
+
+.bracket-bye-item .bracket-label {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.bracket-bye-hint {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: #5ac8fa;
+  font-weight: 600;
+}
+
+.bracket-r2-wait {
+  margin: 0.5rem 0.65rem 0.75rem;
+}
+
+.phase-prelim-r2 .bracket-column-head {
+  border-left-color: #64d2ff;
+}
+
 .bracket-column-wrap {
   flex: 0 0 min(260px, 78vw);
   min-width: 220px;
@@ -4562,8 +4607,8 @@ body.replay-theater-active .finish-announce {
 
   body.launch-active.launch-live .scoreboard {
     --hud-name-top: max(2.15rem, calc(env(safe-area-inset-top) + 1.75rem));
-    --hud-score-top: max(4.85rem, calc(env(safe-area-inset-top) + 4.2rem));
-    --hud-rail-top: max(8.25rem, calc(env(safe-area-inset-top) + 7.5rem));
+    --hud-score-top: max(5.5rem, calc(env(safe-area-inset-top) + 4.85rem));
+    --hud-rail-top: max(9rem, calc(env(safe-area-inset-top) + 8.25rem));
     --hud-rail-bottom: max(4.85rem, calc(env(safe-area-inset-bottom) + 4rem));
     --hud-btn-bottom: max(0.45rem, env(safe-area-inset-bottom));
     --hud-panel-w: calc((100vw - 5.5rem - env(safe-area-inset-left) - env(safe-area-inset-right)) / 2);
@@ -4613,7 +4658,8 @@ body.replay-theater-active .finish-announce {
 
   body.launch-active.launch-live .player-name {
     font-size: clamp(1.05rem, 3.6vw, 1.35rem);
-    padding: 0.1rem 0.45rem 0.38rem;
+    line-height: 1.35;
+    padding: 0.12rem 0.45rem 0.5rem;
   }
 
   body.launch-active.launch-live .player-header::before {

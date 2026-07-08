@@ -107,38 +107,73 @@ export function buildFinishSchedule(meta: ReplayMetadata, videoDurationSec = 0):
 }
 
 export function waitForVideoReady(video: HTMLVideoElement): Promise<number> {
-  if (!video.src) return Promise.resolve(0);
-  if (video.readyState >= 3 && Number.isFinite(video.duration)) return Promise.resolve(video.duration);
+  if (!video.src) return Promise.reject(new Error('no video src'));
+  if (video.readyState >= 3 && Number.isFinite(video.duration) && video.duration > 0) {
+    return Promise.resolve(video.duration);
+  }
 
-  return new Promise((resolve) => {
-    const done = () => resolve(Number.isFinite(video.duration) ? video.duration : 0);
-    video.addEventListener('canplay', done, { once: true });
-    video.addEventListener('loadedmetadata', () => {
-      if (video.readyState >= 2) done();
-    }, { once: true });
-    window.setTimeout(done, 4000);
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      video.removeEventListener('canplay', onReady);
+      video.removeEventListener('loadedmetadata', onMeta);
+      video.removeEventListener('error', onError);
+    };
+    const onReady = () => {
+      cleanup();
+      resolve(Number.isFinite(video.duration) ? video.duration : 0);
+    };
+    const onMeta = () => {
+      if (video.readyState >= 2 && Number.isFinite(video.duration)) onReady();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error('video load failed'));
+    };
+    video.addEventListener('canplay', onReady, { once: true });
+    video.addEventListener('loadedmetadata', onMeta, { once: true });
+    video.addEventListener('error', onError, { once: true });
+    window.setTimeout(() => {
+      if (video.readyState >= 2 && Number.isFinite(video.duration)) onReady();
+      else {
+        cleanup();
+        reject(new Error('video load timeout'));
+      }
+    }, 6000);
   });
 }
 
-export async function prepareReplayVideo(video: HTMLVideoElement, url: string): Promise<number> {
-  const current = video.currentSrc || video.src || '';
-  if (current !== url && !current.endsWith(url)) {
-    video.src = url;
+export async function prepareReplayVideo(video: HTMLVideoElement, urlOrUrls: string | string[]): Promise<number> {
+  const urls = Array.isArray(urlOrUrls) ? urlOrUrls : [urlOrUrls];
+  let lastError: unknown;
+
+  for (const url of urls) {
+    if (!url) continue;
+    const current = video.currentSrc || video.src || '';
+    if (current !== url && !current.endsWith(url)) {
+      video.src = url;
+    }
+    try {
+      const duration = await waitForVideoReady(video);
+      try {
+        video.currentTime = 0;
+      } catch { /* seek unsupported */ }
+      try {
+        await video.play();
+        video.muted = false;
+        video.volume = 1;
+        applyReplayPlaybackRate(video);
+      } catch (err) {
+        replayDebug('autoplay blocked', err);
+      }
+      replayDebug('video ready', { duration, url });
+      return duration;
+    } catch (err) {
+      lastError = err;
+      replayDebug('video source failed', { url, err });
+    }
   }
-  const duration = await waitForVideoReady(video);
-  try {
-    video.currentTime = 0;
-  } catch { /* seek unsupported */ }
-  try {
-    await video.play();
-    video.muted = false;
-    video.volume = 1;
-    applyReplayPlaybackRate(video);
-  } catch (err) {
-    replayDebug('autoplay blocked', err);
-  }
-  replayDebug('video ready', { duration, url });
-  return duration;
+
+  throw lastError || new Error('replay video unavailable');
 }
 
 export async function syncReplayVideoTime(video: HTMLVideoElement, targetSec: number) {

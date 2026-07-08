@@ -29,6 +29,7 @@ export type Match = {
   id: string;
   phase: string;
   label?: string;
+  round?: number;
   p1Id?: string | null;
   p2Id?: string | null;
   status: 'pending' | 'done';
@@ -42,7 +43,8 @@ export type Match = {
 export type SessionData = {
   players: Player[];
   drawn: boolean;
-  matches: Record<string, Match | Match[]>;
+  matches: Record<string, Match | Match[] | Record<string, string[]>>;
+  revivalWinnerId?: string | null;
   activeMatchId?: string | null;
 };
 

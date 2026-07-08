@@ -493,25 +493,76 @@ def push_replay_meta_to_cloud(session):
     return False, f'arena_replays {status} {text}'
 
 
-def push_replay_video_to_cloud(replay_id, video_bytes):
+def transcode_webm_to_mp4_bytes(webm_bytes):
+    ffmpeg = shutil.which('ffmpeg')
+    if not ffmpeg or len(webm_bytes) < 1024:
+        return None
+
+    tmp_dir = os.path.join(REPLAY_DIR, '.transcode')
+    os.makedirs(tmp_dir, exist_ok=True)
+    inp_path = os.path.join(tmp_dir, f'in-{int(time.time() * 1000)}.webm')
+    out_path = inp_path.replace('.webm', '.mp4')
+    try:
+        with open(inp_path, 'wb') as f:
+            f.write(webm_bytes)
+        proc = subprocess.run(
+            [
+                ffmpeg, '-y', '-i', inp_path,
+                '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+                '-c:a', 'aac', '-movflags', '+faststart',
+                out_path,
+            ],
+            capture_output=True,
+            timeout=180,
+        )
+        if proc.returncode != 0 or not os.path.isfile(out_path):
+            return None
+        with open(out_path, 'rb') as f:
+            mp4_bytes = f.read()
+        return mp4_bytes if len(mp4_bytes) > 1024 else None
+    except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+        return None
+    finally:
+        for path in (inp_path, out_path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+
+def push_replay_video_to_cloud(replay_id, video_bytes, content_type='video/webm'):
     cfg = get_cloud_config()
     if not cfg:
         return False, 'cloud not configured'
     if not replay_id or len(video_bytes) < 1024:
         return False, 'video too small'
 
-    storage_path = f"{cfg['eventSlug']}/{replay_id}.webm"
+    is_mp4 = 'mp4' in (content_type or '')
+    primary_ext = 'mp4' if is_mp4 else 'webm'
+    storage_path = f"{cfg['eventSlug']}/{replay_id}.{primary_ext}"
     status, raw = _supabase_request(
         'POST',
         f'/storage/v1/object/replay-videos/{storage_path}',
         video_bytes,
-        content_type='video/webm',
+        content_type=content_type or ('video/mp4' if is_mp4 else 'video/webm'),
         extra_headers={'x-upsert': 'true'},
     )
 
     if not status or status < 200 or status >= 300:
         text = raw.decode('utf-8', errors='replace') if isinstance(raw, bytes) else str(raw)
         return False, f'storage {status} {text}'
+
+    if not is_mp4:
+        mp4_bytes = transcode_webm_to_mp4_bytes(video_bytes)
+        if mp4_bytes:
+            mp4_path = f"{cfg['eventSlug']}/{replay_id}.mp4"
+            _supabase_request(
+                'POST',
+                f'/storage/v1/object/replay-videos/{mp4_path}',
+                mp4_bytes,
+                content_type='video/mp4',
+                extra_headers={'x-upsert': 'true'},
+            )
 
     patch = json.dumps({'has_video': True, 'updated_at': _utc_iso()})
     rid = urllib.parse.quote(replay_id, safe='')
@@ -1306,7 +1357,8 @@ class ArenaHandler(http.server.SimpleHTTPRequestHandler):
         if cloud_replay_video:
             replay_id = cloud_replay_video.group(1)
             raw = self._read_body()
-            ok, err = push_replay_video_to_cloud(replay_id, raw)
+            content_type = self.headers.get('Content-Type', 'video/webm')
+            ok, err = push_replay_video_to_cloud(replay_id, raw, content_type=content_type)
             if ok:
                 self._send_json({'ok': True, 'id': replay_id, 'bytes': len(raw)})
             else:

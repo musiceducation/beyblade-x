@@ -197,9 +197,10 @@ async function uploadReplayToSupabase(session, blob, attempt = 0) {
     }
 
     if (blob && session.videoId && blob.size > 1024) {
+      const contentType = blob.type || 'video/webm';
       const videoRes = await fetch(`/cloud/replay/${encodeURIComponent(session.id)}/video`, {
         method: 'POST',
-        headers: { 'Content-Type': 'video/webm' },
+        headers: { 'Content-Type': contentType },
         body: blob,
       });
       const videoData = await videoRes.json().catch(() => ({}));
