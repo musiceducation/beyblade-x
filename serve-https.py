@@ -4,6 +4,7 @@ import http.server
 import json
 import os
 import re
+import secrets
 import shutil
 import socket
 import ssl
@@ -88,6 +89,24 @@ MATCH_LOCK = {
     'since': 0,
 }
 MATCH_LOCK_GUARD = threading.Lock()
+
+# Host browser screen share → multi-viewer WebRTC signaling (LAN)
+SCREEN_SHARE = {
+    'active': False,
+    'room': None,
+    'startedAt': 0,
+    'viewers': {},  # viewerId -> { joinedAt, offer, answer }
+}
+SCREEN_SHARE_LOCK = threading.Lock()
+
+
+def _screen_share_room_code():
+    alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+    return ''.join(secrets.choice(alphabet) for _ in range(4))
+
+
+def _new_viewer_id():
+    return 'v' + secrets.token_hex(4)
 
 
 def ensure_replay_dir():
@@ -1078,6 +1097,37 @@ class ArenaHandler(http.server.SimpleHTTPRequestHandler):
                 self._send_json(dict(ARENA_LIVE_STATE))
             return
 
+        if path == '/screen-share/status.json':
+            with SCREEN_SHARE_LOCK:
+                viewers = [
+                    {
+                        'id': vid,
+                        'joinedAt': meta.get('joinedAt'),
+                        'hasOffer': bool(meta.get('offer')),
+                        'hasAnswer': bool(meta.get('answer')),
+                    }
+                    for vid, meta in SCREEN_SHARE['viewers'].items()
+                ]
+                self._send_json({
+                    'active': SCREEN_SHARE['active'],
+                    'room': SCREEN_SHARE['room'],
+                    'startedAt': SCREEN_SHARE['startedAt'],
+                    'viewerCount': len(SCREEN_SHARE['viewers']),
+                    'viewers': viewers,
+                })
+            return
+
+        share_signal = re.fullmatch(r'/screen-share/signal/(v[a-f0-9]+)/(offer|answer)', path)
+        if share_signal:
+            viewer_id, kind = share_signal.group(1), share_signal.group(2)
+            with SCREEN_SHARE_LOCK:
+                meta = SCREEN_SHARE['viewers'].get(viewer_id)
+                if not meta:
+                    self._send_json({})
+                    return
+                self._send_json(meta.get(kind) or {})
+            return
+
         if path == '/match/lock.json':
             self._send_json(match_lock_snapshot())
             return
@@ -1264,6 +1314,65 @@ class ArenaHandler(http.server.SimpleHTTPRequestHandler):
                 live_snapshot = dict(ARENA_LIVE_STATE)
             self._send_json({'ok': True})
             threading.Thread(target=push_arena_live_to_cloud, args=(live_snapshot,), daemon=True).start()
+            return
+
+        if path == '/screen-share/start':
+            with SCREEN_SHARE_LOCK:
+                room = _screen_share_room_code()
+                SCREEN_SHARE['active'] = True
+                SCREEN_SHARE['room'] = room
+                SCREEN_SHARE['startedAt'] = int(time.time() * 1000)
+                SCREEN_SHARE['viewers'] = {}
+            ip = get_lan_ip() or 'localhost'
+            view_url = f'https://{ip}:{PORT}/screen-view.html?room={room}'
+            self._send_json({'ok': True, 'room': room, 'viewUrl': view_url})
+            return
+
+        if path == '/screen-share/stop':
+            with SCREEN_SHARE_LOCK:
+                SCREEN_SHARE['active'] = False
+                SCREEN_SHARE['room'] = None
+                SCREEN_SHARE['startedAt'] = 0
+                SCREEN_SHARE['viewers'] = {}
+            self._send_json({'ok': True})
+            return
+
+        if path == '/screen-share/join':
+            raw = self._read_body()
+            try:
+                payload = json.loads(raw.decode('utf-8') or '{}')
+            except json.JSONDecodeError:
+                self._send_json({'error': 'bad json'}, 400)
+                return
+            room = str(payload.get('room') or '').strip().upper()
+            with SCREEN_SHARE_LOCK:
+                if not SCREEN_SHARE['active'] or SCREEN_SHARE['room'] != room:
+                    self._send_json({'ok': False, 'error': '分享未開始或房間碼錯誤'}, 409)
+                    return
+                viewer_id = _new_viewer_id()
+                SCREEN_SHARE['viewers'][viewer_id] = {
+                    'joinedAt': int(time.time() * 1000),
+                    'offer': None,
+                    'answer': None,
+                }
+            self._send_json({'ok': True, 'viewerId': viewer_id, 'room': room})
+            return
+
+        share_signal = re.fullmatch(r'/screen-share/signal/(v[a-f0-9]+)/(offer|answer)', path)
+        if share_signal:
+            viewer_id, kind = share_signal.group(1), share_signal.group(2)
+            raw = self._read_body()
+            try:
+                payload = json.loads(raw.decode('utf-8') or '{}')
+            except json.JSONDecodeError:
+                self._send_json({'error': 'bad json'}, 400)
+                return
+            with SCREEN_SHARE_LOCK:
+                if viewer_id not in SCREEN_SHARE['viewers']:
+                    self._send_json({'error': 'unknown viewer'}, 404)
+                    return
+                SCREEN_SHARE['viewers'][viewer_id][kind] = payload
+            self._send_json({'ok': True})
             return
 
         if path == '/match/lock.json':

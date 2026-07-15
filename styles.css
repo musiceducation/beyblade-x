@@ -3662,6 +3662,50 @@ body.replay-theater-active .finish-announce {
   white-space: nowrap;
 }
 
+.screen-share-panel {
+  margin-top: 0.75rem;
+  padding-top: 0.65rem;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.screen-share-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.screen-share-status {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted, #8b95a8);
+}
+
+.screen-share-status[data-state="live"] {
+  color: var(--blue, #00d4ff);
+}
+
+.screen-share-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.screen-share-link {
+  margin: 0.4rem 0 0;
+  font-size: 0.72rem;
+  color: var(--gold, #ffd60a);
+  word-break: break-all;
+  line-height: 1.35;
+}
+
+.screen-share-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.7rem;
+  color: var(--text-muted, #8b95a8);
+  line-height: 1.4;
+}
+
 .draw-badge {
   font-size: 0.72rem;
   padding: 0.25rem 0.55rem;

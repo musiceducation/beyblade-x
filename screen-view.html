@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>咩咩遊樂園 — 畫面分享</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Orbitron:wght@700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #070b12;
+      --text: #e8ecf4;
+      --muted: #8b95a8;
+      --gold: #ffd60a;
+      --blue: #00d4ff;
+      --red: #ff2d55;
+      --border: rgba(255, 255, 255, 0.1);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Rajdhani', system-ui, sans-serif;
+    }
+    body {
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+    }
+    .share-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.65rem 1rem;
+      padding: 0.75rem 1rem;
+      padding-top: max(0.75rem, env(safe-area-inset-top));
+      border-bottom: 1px solid var(--border);
+      background: rgba(0, 0, 0, 0.35);
+    }
+    .share-brand {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.85rem;
+      letter-spacing: 0.06em;
+      color: var(--gold);
+    }
+    .share-status {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--muted);
+    }
+    .share-status[data-state="live"] { color: var(--blue); }
+    .share-status[data-state="err"] { color: var(--red); }
+    .share-room {
+      margin-left: auto;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    .share-room strong { color: var(--gold); letter-spacing: 0.12em; }
+    .btn {
+      font-family: inherit;
+      font-weight: 700;
+      font-size: 0.85rem;
+      padding: 0.45rem 0.85rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text);
+      cursor: pointer;
+      min-height: 40px;
+    }
+    .btn-primary {
+      border-color: rgba(0, 212, 255, 0.4);
+      background: rgba(0, 212, 255, 0.12);
+      color: var(--blue);
+    }
+    .share-stage {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.75rem;
+      background: #000;
+      min-height: 0;
+    }
+    #share-video {
+      width: 100%;
+      height: 100%;
+      max-height: calc(100dvh - 4.5rem);
+      object-fit: contain;
+      background: #000;
+      border-radius: 8px;
+    }
+    .share-empty {
+      text-align: center;
+      color: var(--muted);
+      padding: 2rem 1rem;
+      max-width: 28rem;
+      line-height: 1.5;
+    }
+    .share-empty strong { color: var(--text); }
+    body.is-fullscreen .share-bar { display: none; }
+    body.is-fullscreen .share-stage { padding: 0; }
+    body.is-fullscreen #share-video {
+      max-height: 100dvh;
+      border-radius: 0;
+    }
+  </style>
+</head>
+<body>
+  <header class="share-bar">
+    <span class="share-brand">LIVE SHARE</span>
+    <span id="share-status" class="share-status" data-state="idle">連線中…</span>
+    <span class="share-room">房間 <strong id="share-room">—</strong></span>
+    <button type="button" class="btn" id="btn-reconnect">重新連線</button>
+    <button type="button" class="btn btn-primary" id="btn-fullscreen">全螢幕</button>
+  </header>
+  <main class="share-stage">
+    <video id="share-video" autoplay playsinline></video>
+    <div id="share-empty" class="share-empty" hidden>
+      <p><strong>等待主機開始畫面分享</strong></p>
+      <p>請確認主機已按「開始畫面分享」，並選擇要分享的視窗／整個螢幕／此分頁。</p>
+    </div>
+  </main>
+  <script>
+    const ICE = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+      ],
+    };
+
+    const params = new URLSearchParams(location.search);
+    const room = (params.get('room') || '').trim().toUpperCase();
+    const statusEl = document.getElementById('share-status');
+    const roomEl = document.getElementById('share-room');
+    const video = document.getElementById('share-video');
+    const emptyEl = document.getElementById('share-empty');
+
+    let pc = null;
+    let viewerId = null;
+    let connecting = false;
+
+    roomEl.textContent = room || '—';
+
+    function setStatus(msg, state) {
+      statusEl.textContent = msg;
+      statusEl.dataset.state = state || 'idle';
+    }
+
+    function waitForIceGathering(peer, timeout = 2500) {
+      if (peer.iceGatheringState === 'complete') return Promise.resolve();
+      return new Promise((resolve) => {
+        const timer = setTimeout(done, timeout);
+        function done() {
+          clearTimeout(timer);
+          peer.removeEventListener('icegatheringstatechange', onChange);
+          resolve();
+        }
+        function onChange() {
+          if (peer.iceGatheringState === 'complete') done();
+        }
+        peer.addEventListener('icegatheringstatechange', onChange);
+      });
+    }
+
+    function cleanup() {
+      if (pc) {
+        try { pc.close(); } catch (_) {}
+        pc = null;
+      }
+      video.srcObject = null;
+    }
+
+    async function connect() {
+      if (!room) {
+        setStatus('網址缺少房間碼', 'err');
+        emptyEl.hidden = false;
+        return;
+      }
+      if (connecting) return;
+      connecting = true;
+      cleanup();
+      setStatus('加入房間…', 'idle');
+      emptyEl.hidden = true;
+
+      try {
+        const joinRes = await fetch('/screen-share/join', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ room }),
+        });
+        const joinData = await joinRes.json().catch(() => ({}));
+        if (!joinRes.ok || !joinData.ok) {
+          setStatus(joinData.error || '主機尚未開始分享', 'err');
+          emptyEl.hidden = false;
+          connecting = false;
+          return;
+        }
+        viewerId = joinData.viewerId;
+        setStatus('等待主機畫面…', 'idle');
+
+        pc = new RTCPeerConnection(ICE);
+        pc.ontrack = (ev) => {
+          video.srcObject = ev.streams[0] || new MediaStream([ev.track]);
+          video.play().catch(() => {});
+          setStatus('直播中', 'live');
+          emptyEl.hidden = true;
+        };
+        pc.onconnectionstatechange = () => {
+          if (pc.connectionState === 'failed') {
+            setStatus('連線失敗，請重試', 'err');
+          } else if (pc.connectionState === 'connected') {
+            setStatus('直播中', 'live');
+          }
+        };
+
+        const deadline = Date.now() + 45000;
+        let offer = null;
+        while (Date.now() < deadline) {
+          const offerRes = await fetch(`/screen-share/signal/${encodeURIComponent(viewerId)}/offer`, { cache: 'no-store' });
+          offer = await offerRes.json().catch(() => ({}));
+          if (offer?.type === 'offer' && offer.sdp) break;
+          await new Promise((r) => setTimeout(r, 400));
+        }
+        if (!offer?.sdp) {
+          setStatus('逾時：主機未回應', 'err');
+          emptyEl.hidden = false;
+          connecting = false;
+          return;
+        }
+
+        await pc.setRemoteDescription(offer);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await waitForIceGathering(pc);
+        const local = pc.localDescription;
+        await fetch(`/screen-share/signal/${encodeURIComponent(viewerId)}/answer`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: local.type, sdp: local.sdp }),
+        });
+        setStatus('連線建立中…', 'idle');
+      } catch (err) {
+        console.warn(err);
+        setStatus('連線錯誤', 'err');
+        emptyEl.hidden = false;
+      }
+      connecting = false;
+    }
+
+    document.getElementById('btn-reconnect').addEventListener('click', () => connect());
+    document.getElementById('btn-fullscreen').addEventListener('click', () => {
+      const root = document.documentElement;
+      if (!document.fullscreenElement) {
+        (root.requestFullscreen || root.webkitRequestFullscreen)?.call(root);
+        document.body.classList.add('is-fullscreen');
+      } else {
+        (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+        document.body.classList.remove('is-fullscreen');
+      }
+    });
+    document.addEventListener('fullscreenchange', () => {
+      document.body.classList.toggle('is-fullscreen', Boolean(document.fullscreenElement));
+    });
+
+    connect();
+  </script>
+</body>
+</html>
