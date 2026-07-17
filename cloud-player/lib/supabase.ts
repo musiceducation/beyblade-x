@@ -36,3 +36,26 @@ export function getReplayVideoUrls(replayId: string): string[] {
   if (preferMp4Replay()) return [mp4, webm].filter(Boolean) as string[];
   return [webm, mp4].filter(Boolean) as string[];
 }
+
+async function replayUrlExists(url: string) {
+  try {
+    const res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Prefer formats that actually exist in storage (avoids iPhone trying missing MP4). */
+export async function resolveReplayVideoUrls(replayId: string): Promise<string[]> {
+  const ordered = getReplayVideoUrls(replayId);
+  if (!ordered.length) return [];
+
+  const checks = await Promise.all(
+    ordered.map(async (url) => ((await replayUrlExists(url)) ? url : null)),
+  );
+  const existing = checks.filter(Boolean) as string[];
+  if (existing.length) return existing;
+
+  return ordered;
+}

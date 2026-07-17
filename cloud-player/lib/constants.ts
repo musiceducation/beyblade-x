@@ -38,7 +38,11 @@ export type Match = {
   liveScores?: [number, number] | null;
   battles?: number;
   liveBattles?: number;
+  pairingLocked?: boolean;
+  queuePriority?: number;
 };
+
+export const DEFAULT_SCHEDULE_RULES = '比賽流程：初賽 → 復活賽（僅初賽落敗）→ 複賽（落敗直接淘汰）→ 四強挑戰 → 準決賽 → 決賽 · 無季軍戰';
 
 export type SessionData = {
   players: Player[];
@@ -46,6 +50,7 @@ export type SessionData = {
   matches: Record<string, Match | Match[] | Record<string, string[]>>;
   revivalWinnerId?: string | null;
   activeMatchId?: string | null;
+  scheduleRules?: string;
 };
 
 export type ArenaLiveState = {

@@ -1,0 +1,343 @@
+:root {
+  --bg-deep: #06080f;
+  --gold: #ffd60a;
+  --gold-soft: #ffea70;
+  --red: #ff2d55;
+  --blue: #00d4ff;
+  --text: #f4f7fb;
+  --text-muted: #9aa6bc;
+  --font-display: 'Orbitron', sans-serif;
+  --font-body: 'Rajdhani', sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+html.awards-transparent,
+html.awards-transparent body {
+  background: transparent;
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--text);
+  background: var(--bg-deep);
+}
+
+.awards-stage {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: clamp(1.5rem, 4vw, 3rem);
+  overflow: hidden;
+}
+
+.awards-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 90% 55% at 50% 110%, rgba(255, 214, 10, 0.18), transparent 70%),
+    radial-gradient(ellipse 70% 45% at 50% -10%, rgba(0, 212, 255, 0.12), transparent 65%),
+    linear-gradient(180deg, #05070d 0%, #0a0e17 45%, #120d08 100%);
+}
+
+html.awards-transparent .awards-bg {
+  background: transparent;
+}
+
+.awards-rays {
+  position: absolute;
+  inset: -20%;
+  background: repeating-conic-gradient(
+    from 0deg at 50% 45%,
+    transparent 0 14deg,
+    rgba(255, 214, 10, 0.04) 14deg 16deg,
+    transparent 16deg 30deg
+  );
+  animation: awards-rays-spin 48s linear infinite;
+  opacity: 0.7;
+}
+
+.awards-spotlight {
+  position: absolute;
+  top: -8%;
+  width: 38%;
+  height: 85%;
+  filter: blur(18px);
+  opacity: 0.55;
+  animation: awards-spotlight-pulse 4s ease-in-out infinite;
+}
+
+.awards-spotlight--left {
+  left: 8%;
+  background: radial-gradient(ellipse at top, rgba(255, 45, 85, 0.35), transparent 72%);
+}
+
+.awards-spotlight--center {
+  left: 31%;
+  width: 38%;
+  background: radial-gradient(ellipse at top, rgba(255, 214, 10, 0.45), transparent 72%);
+  animation-delay: 0.8s;
+}
+
+.awards-spotlight--right {
+  right: 8%;
+  background: radial-gradient(ellipse at top, rgba(0, 212, 255, 0.32), transparent 72%);
+  animation-delay: 1.6s;
+}
+
+.awards-sparkles {
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(circle, rgba(255, 255, 255, 0.9) 0 1px, transparent 2px),
+    radial-gradient(circle, rgba(255, 214, 10, 0.8) 0 1.5px, transparent 3px);
+  background-size: 120px 120px, 180px 180px;
+  background-position: 0 0, 60px 40px;
+  animation: awards-sparkle-drift 18s linear infinite;
+  opacity: 0.35;
+  mix-blend-mode: screen;
+}
+
+.awards-floor-glow {
+  position: absolute;
+  left: 50%;
+  bottom: 8%;
+  width: min(72vw, 720px);
+  height: 120px;
+  transform: translateX(-50%);
+  background: radial-gradient(ellipse at center, rgba(255, 214, 10, 0.28), transparent 72%);
+  filter: blur(8px);
+}
+
+.awards-header,
+.awards-content,
+.awards-footer {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 1080px);
+}
+
+.awards-header {
+  text-align: center;
+}
+
+.awards-venue {
+  font-family: var(--font-display);
+  font-size: clamp(0.72rem, 1.8vw, 0.9rem);
+  letter-spacing: 0.35em;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.awards-title {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 7vw, 4.2rem);
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  background: linear-gradient(135deg, #fff 0%, var(--gold-soft) 35%, var(--gold) 70%, #fff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 40px rgba(255, 214, 10, 0.25);
+  margin-bottom: 0.65rem;
+}
+
+.awards-session {
+  display: inline-block;
+  padding: 0.28rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 214, 10, 0.35);
+  background: rgba(255, 214, 10, 0.1);
+  color: var(--gold-soft);
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+}
+
+.awards-content {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+
+.awards-waiting {
+  text-align: center;
+  padding: 1.5rem 2rem;
+  border-radius: 20px;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(6px);
+}
+
+.awards-waiting-icon {
+  font-size: clamp(2rem, 6vw, 3.5rem);
+  margin-bottom: 0.5rem;
+  animation: awards-trophy-bob 2.4s ease-in-out infinite;
+}
+
+.awards-waiting h2 {
+  font-family: var(--font-display);
+  font-size: clamp(1.1rem, 3vw, 1.6rem);
+  letter-spacing: 0.08em;
+  margin-bottom: 0.35rem;
+}
+
+.awards-waiting p {
+  color: var(--text-muted);
+  font-size: clamp(0.95rem, 2.2vw, 1.1rem);
+}
+
+.awards-podium {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr 1fr;
+  align-items: end;
+  gap: clamp(0.75rem, 2vw, 1.5rem);
+  width: min(100%, 920px);
+}
+
+.awards-podium-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  text-align: center;
+  padding: 1rem 0.75rem 0;
+  border-radius: 18px 18px 0 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: none;
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.35);
+  animation: awards-podium-rise 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.awards-podium-slot--1 {
+  min-height: clamp(180px, 28vh, 280px);
+  background: linear-gradient(180deg, rgba(255, 214, 10, 0.22), rgba(255, 214, 10, 0.04));
+  border-color: rgba(255, 214, 10, 0.45);
+  animation-delay: 0.15s;
+}
+
+.awards-podium-slot--2 {
+  min-height: clamp(130px, 20vh, 210px);
+  animation-delay: 0.3s;
+}
+
+.awards-podium-slot--3 {
+  min-height: clamp(110px, 16vh, 180px);
+  animation-delay: 0.45s;
+}
+
+.awards-rank {
+  font-family: var(--font-display);
+  font-size: clamp(0.68rem, 1.6vw, 0.82rem);
+  letter-spacing: 0.14em;
+  color: var(--gold-soft);
+  margin-bottom: 0.45rem;
+}
+
+.awards-name {
+  font-family: var(--font-display);
+  font-size: clamp(1.2rem, 3.8vw, 2.4rem);
+  font-weight: 800;
+  line-height: 1.15;
+  word-break: break-word;
+}
+
+.awards-podium-slot--1 .awards-name {
+  font-size: clamp(1.5rem, 5vw, 3rem);
+  background: linear-gradient(135deg, #fff, var(--gold-soft), var(--gold));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.awards-crown {
+  font-size: clamp(1.4rem, 4vw, 2.2rem);
+  margin-bottom: 0.25rem;
+}
+
+.awards-top4 {
+  margin-top: clamp(1rem, 3vw, 1.75rem);
+  width: min(100%, 920px);
+  padding: 0.85rem 1.1rem;
+  border-radius: 14px;
+  border: 1px solid rgba(0, 212, 255, 0.22);
+  background: rgba(0, 212, 255, 0.08);
+  text-align: center;
+  animation: awards-podium-rise 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.55s both;
+}
+
+.awards-top4-label {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  color: var(--blue);
+  margin-bottom: 0.35rem;
+}
+
+.awards-top4-names {
+  font-size: clamp(1rem, 2.5vw, 1.35rem);
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.awards-footer {
+  text-align: center;
+}
+
+.awards-status {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+@keyframes awards-rays-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes awards-spotlight-pulse {
+  0%, 100% { opacity: 0.45; transform: scaleY(1); }
+  50% { opacity: 0.72; transform: scaleY(1.04); }
+}
+
+@keyframes awards-sparkle-drift {
+  from { transform: translateY(0); }
+  to { transform: translateY(120px); }
+}
+
+@keyframes awards-trophy-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes awards-podium-rise {
+  from { opacity: 0; transform: translateY(28px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 720px) {
+  .awards-podium {
+    grid-template-columns: 1fr;
+    max-width: 360px;
+  }
+
+  .awards-podium-slot--1 { order: 1; }
+  .awards-podium-slot--2 { order: 2; }
+  .awards-podium-slot--3 { order: 3; }
+}

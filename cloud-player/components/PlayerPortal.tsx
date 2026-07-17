@@ -105,6 +105,36 @@ export default function PlayerPortal() {
     setRefreshing(false);
   };
 
+  const tabDefs: { id: Tab; label: string; icon: string }[] = [
+    { id: 'live', label: '即時', icon: '⚡' },
+    { id: 'schedule', label: '賽程', icon: '📋' },
+    { id: 'results', label: '成績', icon: '🏆' },
+    { id: 'replay', label: '回放', icon: '🎬' },
+  ];
+
+  const renderTabs = (position: 'top' | 'bottom') => (
+    <nav className={`player-tabs player-tabs--${position}`} aria-label="查閱分頁">
+      {tabDefs.map(({ id, label, icon }) => (
+        <button
+          key={id}
+          type="button"
+          className={`player-tab${tab === id ? ' active' : ''}`}
+          onClick={() => setTabWithUrl(id)}
+        >
+          <span className="player-tab-icon" aria-hidden="true">{icon}</span>
+          <span className="player-tab-label">{label}</span>
+          {id === 'live' && hasLive && <span className="player-tab-live" aria-label="進行中" />}
+          {id === 'schedule' && pendingCount > 0 && (
+            <span className="player-tab-badge">{pendingCount}</span>
+          )}
+          {id === 'replay' && replayTabCount > 0 && (
+            <span className="player-tab-badge">{replayTabCount}</span>
+          )}
+        </button>
+      ))}
+    </nav>
+  );
+
   return (
     <div className="portal-shell">
       <div className="player-sticky-shell">
@@ -200,25 +230,7 @@ export default function PlayerPortal() {
         </div>
       </header>
 
-      <nav className="player-tabs" aria-label="查閱分頁">
-        {(['live', 'schedule', 'results', 'replay'] as Tab[]).map((t) => (
-          <button
-            key={t}
-            type="button"
-            className={`player-tab${tab === t ? ' active' : ''}`}
-            onClick={() => setTabWithUrl(t)}
-          >
-            {t === 'live' ? '即時' : t === 'schedule' ? '賽程' : t === 'results' ? '成績' : '回放'}
-            {t === 'live' && hasLive && <span className="player-tab-live" aria-label="進行中" />}
-            {t === 'schedule' && pendingCount > 0 && (
-              <span className="player-tab-badge">{pendingCount}</span>
-            )}
-            {t === 'replay' && replayTabCount > 0 && (
-              <span className="player-tab-badge">{replayTabCount}</span>
-            )}
-          </button>
-        ))}
-      </nav>
+      {renderTabs('top')}
       </div>
 
       <main className="player-main">
@@ -263,6 +275,8 @@ export default function PlayerPortal() {
           />
         )}
       </main>
+
+      {renderTabs('bottom')}
 
       <footer className="player-footer">
         <p>雲端查閱 · 4G / 任何網絡皆可 · 由場內主機同步資料</p>

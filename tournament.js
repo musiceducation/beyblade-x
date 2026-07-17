@@ -3,6 +3,7 @@
  */
 
 const QUARTER_ENTRANTS = 8;
+const DEFAULT_SCHEDULE_RULES = '比賽流程：初賽 → 復活賽（僅初賽落敗）→ 複賽（落敗直接淘汰）→ 四強挑戰 → 準決賽 → 決賽 · 無季軍戰 · 賽程表可直接改分、設勝負、雙擊進入計分';
 const STORAGE_KEY = 'beyblade-tournament-v1';
 const SYNC_POLL_MS = 1500;
 const LIVE_SYNC_DEBOUNCE_MS = 200;
@@ -25,6 +26,7 @@ const tournamentState = {
   eliminatedIds: [],
   revivalWinnerId: null,
   activeMatchId: null,
+  scheduleRules: '',
 };
 
 function createEmptySessionData() {
@@ -35,7 +37,32 @@ function createEmptySessionData() {
     eliminatedIds: [],
     revivalWinnerId: null,
     activeMatchId: null,
+    scheduleRules: '',
   };
+}
+
+function getScheduleRulesFromData(data) {
+  const text = (data?.scheduleRules || '').trim();
+  return text || DEFAULT_SCHEDULE_RULES;
+}
+
+function getScheduleRules() {
+  return getScheduleRulesFromData(tournamentState);
+}
+
+function setScheduleRules(text) {
+  const trimmed = (text || '').trim();
+  tournamentState.scheduleRules = trimmed === DEFAULT_SCHEDULE_RULES ? '' : trimmed;
+  persistSession();
+  renderScheduleRules();
+}
+
+function renderScheduleRules() {
+  const el = $('#tournament-rundown');
+  const input = $('#schedule-rules-input');
+  const rules = getScheduleRules();
+  if (el) el.textContent = rules;
+  if (input && document.activeElement !== input) input.value = rules;
 }
 
 function loadTournamentStorage() {
@@ -59,6 +86,7 @@ function buildSessionPayload() {
     eliminatedIds: tournamentState.eliminatedIds,
     revivalWinnerId: tournamentState.revivalWinnerId,
     activeMatchId: tournamentState.activeMatchId,
+    scheduleRules: tournamentState.scheduleRules || '',
   };
 }
 
@@ -87,6 +115,7 @@ function applySessionData(data) {
   tournamentState.eliminatedIds = data.eliminatedIds || [];
   tournamentState.revivalWinnerId = data.revivalWinnerId || null;
   tournamentState.activeMatchId = data.activeMatchId || null;
+  tournamentState.scheduleRules = data.scheduleRules || '';
 }
 
 function applyRemoteTournamentState(remote) {
@@ -570,15 +599,89 @@ function getPrelimByePlayerIds(roundNo) {
   return ids.filter((id) => !inLaterRound.has(id));
 }
 
+function getPrelimByeEntries(roundNo) {
+  const byes = (tournamentState.matches.prelimByes || {})[roundNo] || [];
+  const visibleIds = new Set(getPrelimByePlayerIds(roundNo));
+  return byes
+    .map((id, index) => ({ id, index }))
+    .filter((entry) => entry.id && visibleIds.has(entry.id));
+}
+
+function adminUpdatePrelimBye(roundNo, byeIndex, playerInput) {
+  const byes = (tournamentState.matches.prelimByes || {})[roundNo];
+  if (!byes || byeIndex < 0 || byeIndex >= byes.length) return false;
+
+  const name = (playerInput || '').trim().slice(0, 16);
+  if (!name) {
+    alert('輪空選手名字不能留空');
+    return false;
+  }
+
+  const oldId = byes[byeIndex];
+  const existing = tournamentState.players.find((player) =>
+    player.name.localeCompare(name, undefined, { sensitivity: 'accent' }) === 0
+  );
+  const nextId = existing?.id || resolveMatchPlayerInput(name);
+  if (!nextId || nextId === oldId) return true;
+
+  const completedMatch = (tournamentState.matches.prelim || []).find((match) =>
+    match.status === 'done' && (match.p1Id === nextId || match.p2Id === nextId)
+  );
+  if (completedMatch) {
+    alert(`${playerName(nextId)} 已完成 ${completedMatch.label}，不能改為輪空選手`);
+    return false;
+  }
+
+  let swapped = false;
+  const sourceMatch = (tournamentState.matches.prelim || []).find((match) =>
+    match.status === 'pending' && (match.p1Id === nextId || match.p2Id === nextId)
+  );
+  if (sourceMatch) {
+    if (sourceMatch.p1Id === nextId) sourceMatch.p1Id = oldId;
+    else sourceMatch.p2Id = oldId;
+    sourceMatch.pairingLocked = true;
+    adminResetMatchFields(sourceMatch);
+    swapped = true;
+  }
+
+  if (!swapped) {
+    const byeMaps = tournamentState.matches.prelimByes || {};
+    for (const roundByes of Object.values(byeMaps)) {
+      const sourceIndex = roundByes.findIndex((id) => id === nextId);
+      if (sourceIndex >= 0) {
+        roundByes[sourceIndex] = oldId;
+        swapped = true;
+        break;
+      }
+    }
+  }
+
+  byes[byeIndex] = nextId;
+  advanceWinners();
+  persistSession();
+  renderTournamentUI({ scrollActive: false });
+  addLog(`⚙ 初賽 R${roundNo} 輪空改為 ${escapeHtml(playerName(nextId))}`, 'system');
+  return true;
+}
+
 function renderPrelimByeList(roundNo) {
-  const ids = getPrelimByePlayerIds(roundNo);
-  if (!ids.length) return '';
+  const entries = getPrelimByeEntries(roundNo);
+  if (!entries.length) return '';
   const hint = prelimRoundHasFollowUp(roundNo) ? `→ R${roundNo + 1}` : '→ 複賽';
   return `<ul class="bracket-bye-list" aria-label="初賽 R${roundNo} 輪空">
-    ${ids.map((id) => `
+    ${entries.map(({ id, index }) => `
       <li class="bracket-bye-item">
         <span class="bracket-label">R${roundNo} 輪空</span>
-        <span class="slot-name">${escapeHtml(playerName(id))}</span>
+        <label class="bracket-bye-player-edit">
+          <input class="bracket-bye-player-input" type="text" maxlength="16"
+            list="bye-player-options-${roundNo}-${index}" value="${escapeHtml(playerName(id))}"
+            placeholder="輸入或選擇名字" autocomplete="off" aria-label="輪空選手">
+          <datalist id="bye-player-options-${roundNo}-${index}">
+            ${tournamentState.players.map((player) => `<option value="${escapeHtml(player.name)}"></option>`).join('')}
+          </datalist>
+        </label>
+        <button type="button" class="btn btn-xs btn-ghost btn-save-bye-adjust"
+          data-round="${roundNo}" data-bye-index="${index}">儲存</button>
         <span class="bracket-bye-hint">${hint}</span>
       </li>`).join('')}
   </ul>`;
@@ -590,11 +693,15 @@ function getActiveQuarterMatches() {
   return q.filter((m) => m.p1Id && m.p2Id);
 }
 
+function isQuarterSingleSlot(slot) {
+  if (!slot) return false;
+  return Boolean((slot.p1Id && !slot.p2Id) || (!slot.p1Id && slot.p2Id));
+}
+
 function getQuarterSlotChampion(slot) {
   if (!slot) return null;
+  // 只認正式完場勝者；單人輪空須等雙人場全部打完後才 finalize
   if (slot.status === 'done' && slot.winnerId) return slot.winnerId;
-  if (slot.p1Id && !slot.p2Id) return slot.p1Id;
-  if (!slot.p1Id && slot.p2Id) return slot.p2Id;
   return null;
 }
 
@@ -605,10 +712,8 @@ function repairQuarterByeSlots() {
   let changed = false;
   const singleIndices = [];
   q.forEach((slot, idx) => {
-    if (slot.status === 'done') return;
-    const hasP1 = Boolean(slot.p1Id);
-    const hasP2 = Boolean(slot.p2Id);
-    if (hasP1 !== hasP2) singleIndices.push(idx);
+    if (slot.status === 'done' || slot.pairingLocked) return;
+    if (isQuarterSingleSlot(slot)) singleIndices.push(idx);
   });
 
   while (singleIndices.length >= 2) {
@@ -631,8 +736,31 @@ function repairQuarterByeSlots() {
   return changed;
 }
 
+/** 全部雙人複賽打完後，剩餘單人輪空才正式晉級（避免未打完就進準決賽） */
+function finalizeQuarterByeSlots() {
+  const q = tournamentState.matches.quarter;
+  if (!q) return false;
+
+  const dualMatches = q.filter((m) => m.p1Id && m.p2Id);
+  // 尚有未完雙人場時，輪空不可先晉級
+  if (dualMatches.some((m) => m.status !== 'done' || !m.winnerId)) {
+    return false;
+  }
+
+  let changed = false;
+  q.forEach((slot) => {
+    if (slot.status === 'done' || !isQuarterSingleSlot(slot)) return;
+    autoAdvanceBye(slot);
+    if (tournamentState.activeMatchId === slot.id) {
+      tournamentState.activeMatchId = null;
+    }
+    changed = true;
+  });
+  return changed;
+}
+
 function syncPendingBracketPairing(match, p1Id, p2Id) {
-  if (!match || match.status === 'done') return;
+  if (!match || match.status === 'done' || match.pairingLocked) return;
   const wasPlayed = match.status === 'done' && (match.scores || match.liveScores);
   match.p1Id = p1Id || null;
   match.p2Id = p2Id || null;
@@ -941,10 +1069,10 @@ function getPrelimLosersSoFar() {
 
 function isQuarterComplete() {
   const q = tournamentState.matches.quarter || [];
-  const dualMatches = q.filter((m) => m.p1Id && m.p2Id);
-  const singleSlots = q.filter((m) => (m.p1Id && !m.p2Id) || (!m.p1Id && m.p2Id));
-  if (!dualMatches.length && !singleSlots.length) return false;
-  return dualMatches.every((m) => m.status === 'done' && m.winnerId);
+  const occupied = q.filter((m) => m.p1Id || m.p2Id);
+  if (!occupied.length) return false;
+  // 雙人場須打完；單人輪空須已 finalize 為 done（不可未完場就進準決賽）
+  return occupied.every((m) => m.status === 'done' && m.winnerId);
 }
 
 function isRevivalComplete() {
@@ -997,7 +1125,7 @@ function clearPendingBracketSlots(matches) {
   if (!matches) return;
   const list = Array.isArray(matches) ? matches : [matches];
   list.forEach((s) => {
-    if (s.status !== 'done') {
+    if (s.status !== 'done' && !s.pairingLocked) {
       s.p1Id = null;
       s.p2Id = null;
       s.winnerId = null;
@@ -1021,6 +1149,7 @@ function advanceWinners() {
 
   for (let i = 0; i < 4; i++) {
     if (m.quarter[i]) {
+      if (m.quarter[i].pairingLocked) continue;
       if (!prelimResult.complete) {
         if (m.quarter[i].status !== 'done') {
           m.quarter[i].p1Id = null;
@@ -1051,6 +1180,7 @@ function advanceWinners() {
   }
 
   repairQuarterByeSlots();
+  finalizeQuarterByeSlots();
 
   syncRevivalFromPrelim(prelimResult, prelimResult.survivors);
 
@@ -1065,17 +1195,13 @@ function advanceWinners() {
     clearPendingBracketSlots(m.final);
   }
 
-  const semiWinners = m.semi?.map((x) => x.winnerId).filter(Boolean) || [];
-
-  if (semiWinners.length >= 2 && m.final) {
-    if (m.final.status !== 'done') {
-      m.final.p1Id = semiWinners[0];
-      m.final.p2Id = semiWinners[1];
-    }
-  } else if (m.final?.status !== 'done') {
-    m.final.p1Id = null;
-    m.final.p2Id = null;
-    adminResetMatchFields(m.final);
+  // Slot-indexed fill (same as semis): one semi done → finals shows winner vs 待定
+  if (m.final) {
+    syncPendingBracketPairing(
+      m.final,
+      m.semi?.[0]?.winnerId || null,
+      m.semi?.[1]?.winnerId || null,
+    );
   }
 }
 
@@ -1088,7 +1214,10 @@ function getAllMatchesFlat() {
 function getReadyMatches() {
   return getAllMatchesFlat()
     .filter((m) => m.status === 'pending' && m.p1Id && m.p2Id)
-    .sort((a, b) => (PHASE_ORDER[a.phase] ?? 9) - (PHASE_ORDER[b.phase] ?? 9));
+    .sort((a, b) => {
+      const priorityDiff = (b.queuePriority || 0) - (a.queuePriority || 0);
+      return priorityDiff || (PHASE_ORDER[a.phase] ?? 9) - (PHASE_ORDER[b.phase] ?? 9);
+    });
 }
 
 function hideVictorySchedulePanel() {
@@ -1194,6 +1323,7 @@ function recordMatchWinner(matchId, winnerSide, result) {
 
   match.winnerId = winnerId;
   match.status = 'done';
+  delete match.queuePriority;
   match.liveScores = null;
   match.liveBattles = null;
   if (result?.scores) {
@@ -1224,6 +1354,133 @@ function adminClearMatchSlot(match) {
   adminResetMatchFields(match);
   match.p1Id = null;
   match.p2Id = null;
+  delete match.pairingLocked;
+  delete match.queuePriority;
+}
+
+function getMatchPairingPlayerIds(match) {
+  const ids = [];
+  getAllMatchesFlat().forEach((candidate) => {
+    if (candidate.phase !== match.phase || (candidate.status === 'done' && candidate.id !== match.id)) return;
+    [candidate.p1Id, candidate.p2Id].forEach((id) => {
+      if (id && !ids.includes(id)) ids.push(id);
+    });
+  });
+  return ids;
+}
+
+function resolveMatchPlayerInput(value) {
+  const name = (value || '').trim().slice(0, 16);
+  if (!name) return null;
+  const existing = tournamentState.players.find((player) =>
+    player.name.localeCompare(name, undefined, { sensitivity: 'accent' }) === 0
+  );
+  if (existing) return existing.id;
+  const player = { id: genId(), name };
+  tournamentState.players.push(player);
+  return player.id;
+}
+
+function adminUpdateMatch(matchId, label, p1Name, p2Name) {
+  const match = findMatch(matchId);
+  if (!match) return false;
+
+  const nextLabel = (label || '').trim().slice(0, 40);
+  match.label = nextLabel;
+
+  if (match.status === 'done') {
+    persistSession();
+    renderTournamentUI({ scrollActive: false });
+    return true;
+  }
+
+  if (tournamentState.activeMatchId === matchId) {
+    alert('此場正在計分，請先返回賽程或完成比賽再調整');
+    return false;
+  }
+
+  const normalizedP1 = (p1Name || '').trim().slice(0, 16);
+  const normalizedP2 = (p2Name || '').trim().slice(0, 16);
+  if (normalizedP1 && normalizedP2
+    && normalizedP1.localeCompare(normalizedP2, undefined, { sensitivity: 'accent' }) === 0) {
+    alert('同一位選手不能同時出現在對戰雙方');
+    return false;
+  }
+
+  const nextP1 = resolveMatchPlayerInput(normalizedP1);
+  const nextP2 = resolveMatchPlayerInput(normalizedP2);
+
+  const pairingChanged = match.p1Id !== nextP1 || match.p2Id !== nextP2;
+  if (pairingChanged) {
+    const oldIds = [match.p1Id, match.p2Id].filter(Boolean);
+    const newIds = [nextP1, nextP2].filter(Boolean);
+    const displaced = oldIds.filter((id) => !newIds.includes(id));
+
+    for (const selectedId of newIds) {
+      if (oldIds.includes(selectedId)) continue;
+      const source = getAllMatchesFlat().find((candidate) =>
+        candidate.id !== match.id
+        && candidate.phase === match.phase
+        && candidate.status === 'pending'
+        && (candidate.p1Id === selectedId || candidate.p2Id === selectedId)
+      );
+      if (!source) continue;
+      const replacement = displaced.shift() || null;
+      if (source.p1Id === selectedId) source.p1Id = replacement;
+      else source.p2Id = replacement;
+      source.pairingLocked = true;
+      adminResetMatchFields(source);
+    }
+
+    match.p1Id = nextP1;
+    match.p2Id = nextP2;
+    match.pairingLocked = true;
+    adminResetMatchFields(match);
+  }
+
+  persistSession();
+  renderTournamentUI({ scrollActive: false });
+  addLog(`⚙ 已調整 ${escapeHtml(match.label)}`, 'system');
+  return true;
+}
+
+function adminSwapMatchSides(matchId) {
+  const match = findMatch(matchId);
+  if (!match || match.status === 'done' || !match.p1Id || !match.p2Id) return false;
+  if (tournamentState.activeMatchId === matchId) {
+    alert('此場正在計分，不能交換紅藍方');
+    return false;
+  }
+  [match.p1Id, match.p2Id] = [match.p2Id, match.p1Id];
+  if (match.liveScores) [match.liveScores[0], match.liveScores[1]] = [match.liveScores[1], match.liveScores[0]];
+  match.pairingLocked = true;
+  persistSession();
+  renderTournamentUI({ scrollActive: false });
+  return true;
+}
+
+function adminRestoreAutomaticPairing(matchId) {
+  const match = findMatch(matchId);
+  if (!match || match.status === 'done') return false;
+  delete match.pairingLocked;
+  delete match.queuePriority;
+  advanceWinners();
+  persistSession();
+  renderTournamentUI({ scrollActive: false });
+  return true;
+}
+
+function adminToggleNextPriority(matchId) {
+  const match = findMatch(matchId);
+  if (!match || match.status !== 'pending' || !match.p1Id || !match.p2Id) return false;
+  if (match.queuePriority) delete match.queuePriority;
+  else {
+    getAllMatchesFlat().forEach((candidate) => { delete candidate.queuePriority; });
+    match.queuePriority = Date.now();
+  }
+  persistSession();
+  renderTournamentUI({ scrollActive: false });
+  return true;
 }
 
 function adminSetMatchWinner(matchId, winnerSide, options = {}) {
@@ -1356,7 +1613,8 @@ function adminQuickWin(matchId, winnerSide, scores) {
   if (finalScores) {
     const wIdx = winnerSide - 1;
     const lIdx = 1 - wIdx;
-    if (finalScores[wIdx] < finalScores[lIdx]) {
+    // Tied / trailing (e.g. 0:0) still needs a decisive winner score for display
+    if (finalScores[wIdx] <= finalScores[lIdx]) {
       finalScores = winnerSide === 1 ? [target, finalScores[lIdx]] : [finalScores[lIdx], target];
     }
   }
@@ -1394,7 +1652,7 @@ function exportPrintableBracket() {
   win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>賽程表</title>
     <style>body{font-family:system-ui;padding:1.5rem}table{border-collapse:collapse;width:100%;margin-bottom:2rem}
     th,td{border:1px solid #ccc;padding:8px;text-align:left}h2{margin-top:1.5rem}</style></head><body>
-    <h1>咩咩遊樂園 — 賽程表</h1><p>${new Date().toLocaleString()}</p>${rows.join('')}
+    <h1>咩咩遊樂園 — 賽程表</h1><p>${new Date().toLocaleString()}</p><p>${escapeHtml(getScheduleRules())}</p>${rows.join('')}
     <script>window.onload=function(){window.print()}<\/script></body></html>`);
   win.document.close();
 }
@@ -1591,6 +1849,10 @@ async function loadMatchToScoreboard(matchId) {
     alert('此對戰尚未確定選手');
     return;
   }
+  if (match.phase === 'quarter' && isQuarterSingleSlot(match) && match.status !== 'done') {
+    alert('複賽輪空席位須等其他雙人場打完後才自動晉級，或先在「調整場次」配對對手');
+    return;
+  }
   if (match.status === 'done') {
     if (!confirm('此場已完成，仍要重新載入？')) return;
   }
@@ -1751,13 +2013,25 @@ const PHASE_STYLES = {
   final: { title: '決賽', sub: '冠軍', cls: 'phase-final' },
 };
 
+function renderPairingOptions(match) {
+  const suggestedIds = getMatchPairingPlayerIds(match);
+  const allIds = [
+    ...suggestedIds,
+    ...tournamentState.players.map((player) => player.id).filter((id) => !suggestedIds.includes(id)),
+  ];
+  return allIds
+    .map((id) => `<option value="${escapeHtml(playerName(id))}"></option>`)
+    .join('');
+}
+
 function renderMatchCard(match) {
-  const active = match.id === tournamentState.activeMatchId;
-  const statusClass = match.status === 'done' ? 'done' : active ? 'active' : 'pending';
-  const statusLabel = match.status === 'done' ? '完畢' : active ? '進行中' : '待賽';
+  const isByePending = match.phase === 'quarter' && isQuarterSingleSlot(match) && match.status !== 'done';
+  const active = !isByePending && match.id === tournamentState.activeMatchId;
+  const statusClass = match.status === 'done' ? 'done' : isByePending ? 'pending bye-pending' : active ? 'active' : 'pending';
+  const statusLabel = match.status === 'done' ? '完畢' : isByePending ? '輪空' : active ? '進行中' : '待賽';
   const p1Win = match.winnerId === match.p1Id;
   const p2Win = match.winnerId === match.p2Id;
-  const canStart = match.p1Id || match.p2Id;
+  const canStart = !isByePending && (match.p1Id || match.p2Id);
   const phaseCls = PHASE_STYLES[match.phase]?.cls || '';
   const editScores = getMatchScoresForEdit(match);
   const displayScores = match.status === 'done' ? match.scores : match.liveScores;
@@ -1811,6 +2085,50 @@ function renderMatchCard(match) {
       `}
     </div>` : '';
 
+  const pairingEditor = match.status !== 'done' ? `
+    <div class="bracket-pairing-edit">
+      <label>
+        <span>紅方</span>
+        <input class="bracket-player-select" data-side="1" type="text" maxlength="16"
+          list="match-player-options-${escapeHtml(match.id)}" value="${escapeHtml(match.p1Id ? playerName(match.p1Id) : '')}"
+          placeholder="輸入或選擇名字" autocomplete="off">
+      </label>
+      <button type="button" class="btn btn-xs btn-ghost btn-swap-sides" title="交換紅藍方">⇄</button>
+      <label>
+        <span>藍方</span>
+        <input class="bracket-player-select" data-side="2" type="text" maxlength="16"
+          list="match-player-options-${escapeHtml(match.id)}" value="${escapeHtml(match.p2Id ? playerName(match.p2Id) : '')}"
+          placeholder="輸入或選擇名字" autocomplete="off">
+      </label>
+      <datalist id="match-player-options-${escapeHtml(match.id)}">${renderPairingOptions(match)}</datalist>
+    </div>` : '';
+
+  const adjustEditor = `
+    <details class="bracket-adjust">
+      <summary>調整場次${match.pairingLocked ? ' · 手動配對' : ''}${match.queuePriority ? ' · 優先' : ''}</summary>
+      <div class="bracket-adjust-panel">
+        <label class="bracket-label-edit">
+          <span>場次名稱</span>
+          <input class="bracket-label-input" type="text" maxlength="40" value="${escapeHtml(match.label)}">
+        </label>
+        ${pairingEditor}
+        <div class="bracket-adjust-actions">
+          <button type="button" class="btn btn-xs btn-primary btn-save-match-adjust">儲存調整</button>
+          ${match.status !== 'done' && match.p1Id && match.p2Id ? `
+            <button type="button" class="btn btn-xs btn-ghost btn-toggle-next-priority">
+              ${match.queuePriority ? '取消優先' : '設為下一場'}
+            </button>` : ''}
+          ${match.status !== 'done' && match.pairingLocked ? `
+            <button type="button" class="btn btn-xs btn-ghost btn-restore-pairing">恢復自動配對</button>` : ''}
+        </div>
+        ${match.status === 'done'
+          ? '<p class="bracket-adjust-hint">已完場，只可修改名稱；如需改選手請先撤銷結果。</p>'
+          : isByePending
+            ? '<p class="bracket-adjust-hint">可直接輸入新名字；新選手會加入名單。輪空席位須等其他雙人場打完後才晉級。</p>'
+            : '<p class="bracket-adjust-hint">可直接輸入新名字或選擇現有選手；跨場選手會自動交換位置。</p>'}
+      </div>
+    </details>`;
+
   return `<li class="bracket-match ${statusClass} ${phaseCls}" data-match-id="${match.id}">
     <div class="bracket-match-head">
       <span class="bracket-label">${escapeHtml(match.label)}</span>
@@ -1828,7 +2146,7 @@ function renderMatchCard(match) {
           ${p1Win ? '<span class="slot-crown" aria-hidden="true">👑</span>' : ''}
         </span>
       </div>
-      <div class="slot-divider">${scoreText || 'VS'}</div>
+      <div class="slot-divider">${isByePending ? '輪空' : (scoreText || 'VS')}</div>
       <div class="${slotClass(2, match.p2Id, p2Win, p1Win)}">
         <span class="slot-name">${escapeHtml(playerName(match.p2Id))}</span>
         <span class="slot-side-meta">
@@ -1838,6 +2156,7 @@ function renderMatchCard(match) {
       </div>
     </div>
     ${scoreEditor}
+    ${adjustEditor}
   </li>`;
 }
 
@@ -1926,7 +2245,7 @@ function renderBracketSummary() {
   } else if (done === all.length && all.length > 0) {
     nextHint = '<p class="bracket-next-hint done-all">本場賽程已全部完成 🏆</p>';
   } else if (!isOfficialTopFourReady()) {
-    nextHint = '<p class="bracket-next-hint flow-hint">流程：初賽 → 復活賽 → 複賽 → 四強挑戰 → 準決賽 → 決賽</p>';
+    nextHint = `<p class="bracket-next-hint flow-hint">${escapeHtml(getScheduleRules())}</p>`;
   }
 
   return `<div class="bracket-summary">
@@ -2031,6 +2350,7 @@ function renderChallengePicker() {
 
 function renderTournamentUI(options = {}) {
   const { scrollActive = true } = options;
+  renderScheduleRules();
   renderRosterList();
 
   const bracket = $('#bracket-view');
@@ -2096,9 +2416,68 @@ function renderTournamentUI(options = {}) {
 
   bracket.querySelectorAll('.bracket-match').forEach((card) => {
     card.addEventListener('dblclick', (e) => {
-      if (e.target.closest('button, input')) return;
+      if (e.target.closest('button, input, select, summary, details, label')) return;
       const id = card.dataset.matchId;
       if (id) loadMatchToScoreboard(id);
+    });
+  });
+
+  bracket.querySelectorAll('.bracket-adjust').forEach((details) => {
+    details.addEventListener('click', (e) => e.stopPropagation());
+    details.addEventListener('dblclick', (e) => e.stopPropagation());
+  });
+
+  bracket.querySelectorAll('.btn-save-match-adjust').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const card = btn.closest('.bracket-match');
+      if (!card) return;
+      const label = card.querySelector('.bracket-label-input')?.value || '';
+      const p1Name = card.querySelector('.bracket-player-select[data-side="1"]')?.value;
+      const p2Name = card.querySelector('.bracket-player-select[data-side="2"]')?.value;
+      adminUpdateMatch(card.dataset.matchId, label, p1Name, p2Name);
+    });
+  });
+
+  bracket.querySelectorAll('.btn-swap-sides').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      adminSwapMatchSides(btn.closest('.bracket-match')?.dataset.matchId);
+    });
+  });
+
+  bracket.querySelectorAll('.btn-restore-pairing').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      adminRestoreAutomaticPairing(btn.closest('.bracket-match')?.dataset.matchId);
+    });
+  });
+
+  bracket.querySelectorAll('.btn-toggle-next-priority').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      adminToggleNextPriority(btn.closest('.bracket-match')?.dataset.matchId);
+    });
+  });
+
+  bracket.querySelectorAll('.btn-save-bye-adjust').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const item = btn.closest('.bracket-bye-item');
+      const name = item?.querySelector('.bracket-bye-player-input')?.value || '';
+      adminUpdatePrelimBye(
+        parseInt(btn.dataset.round, 10),
+        parseInt(btn.dataset.byeIndex, 10),
+        name,
+      );
+    });
+  });
+
+  bracket.querySelectorAll('.bracket-bye-player-input').forEach((input) => {
+    input.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      input.closest('.bracket-bye-item')?.querySelector('.btn-save-bye-adjust')?.click();
     });
   });
 
@@ -2179,6 +2558,34 @@ function initTournament() {
   $('#btn-sync-keep-local')?.addEventListener('click', () => resolveSyncConflict(false));
   $('#btn-reset-bracket')?.addEventListener('click', resetTournament);
   $('#btn-reset-roster')?.addEventListener('click', resetRoster);
+
+  $('#btn-save-schedule-rules')?.addEventListener('click', () => {
+    setScheduleRules($('#schedule-rules-input')?.value || '');
+    $('#schedule-rules-edit')?.removeAttribute('open');
+    if (typeof showToast === 'function') showToast('賽程規定已儲存');
+  });
+  $('#btn-reset-schedule-rules')?.addEventListener('click', () => {
+    tournamentState.scheduleRules = '';
+    persistSession();
+    renderScheduleRules();
+    $('#schedule-rules-edit')?.removeAttribute('open');
+    if (typeof showToast === 'function') showToast('已還原預設規定');
+  });
+  $('#schedule-rules-edit')?.addEventListener('toggle', () => {
+    if ($('#schedule-rules-edit')?.open) {
+      const input = $('#schedule-rules-input');
+      if (input) {
+        input.value = getScheduleRules();
+        input.focus();
+      }
+    }
+  });
+  $('#schedule-rules-input')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      $('#btn-save-schedule-rules')?.click();
+    }
+  });
 
   document.querySelectorAll('.tournament-tools-menu button').forEach((btn) => {
     btn.addEventListener('click', () => {

@@ -224,6 +224,10 @@ function shareScheduleText() {
   const data = payload[session];
   if (!data?.drawn) return '賽程尚未抽籤';
   const lines = [`咩咩遊樂園 — ${session === 'senior' ? '公開組' : '親子組'}`, ''];
+  const rules = typeof getScheduleRulesFromData === 'function'
+    ? getScheduleRulesFromData(data)
+    : (data.scheduleRules || '').trim();
+  if (rules) lines.push(rules, '');
   getAllMatches(data).forEach((m) => {
     if (!m.p1Id && !m.p2Id) return;
     const p1 = data.players?.find((p) => p.id === m.p1Id)?.name || '待定';

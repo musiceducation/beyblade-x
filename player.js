@@ -13,6 +13,13 @@ const PHASE_LABELS = {
   final: '決賽',
 };
 
+const DEFAULT_SCHEDULE_RULES = '比賽流程：初賽 → 復活賽（僅初賽落敗）→ 複賽（落敗直接淘汰）→ 四強挑戰 → 準決賽 → 決賽 · 無季軍戰';
+
+function getScheduleRulesFromData(data) {
+  const text = (data?.scheduleRules || '').trim();
+  return text || DEFAULT_SCHEDULE_RULES;
+}
+
 const PHASE_ORDER = { prelim: 0, revival: 1, quarter: 2, challenge: 3, semi: 4, final: 5 };
 
 const SESSION_LABELS = {
@@ -169,7 +176,10 @@ function renderLive() {
   const ready = matches
     .filter((m) => m.status === 'pending' && m.p1Id && m.p2Id)
     .filter((m) => matchInvolvesName(m, data, state.search))
-    .sort((a, b) => (PHASE_ORDER[a.phase] ?? 9) - (PHASE_ORDER[b.phase] ?? 9))
+    .sort((a, b) => {
+      const priorityDiff = (b.queuePriority || 0) - (a.queuePriority || 0);
+      return priorityDiff || (PHASE_ORDER[a.phase] ?? 9) - (PHASE_ORDER[b.phase] ?? 9);
+    })
     .slice(0, 3);
 
   if (ready.length) {
@@ -199,12 +209,19 @@ function renderSchedule() {
   const list = $('#schedule-list');
   const empty = $('#schedule-empty');
   const progress = $('#schedule-progress');
+  const rulesEl = $('#schedule-rules');
 
   if (!data?.drawn || !data.matches?.prelim) {
     list.innerHTML = '';
     empty.hidden = false;
     progress.innerHTML = '';
+    if (rulesEl) rulesEl.hidden = true;
     return;
+  }
+
+  if (rulesEl) {
+    rulesEl.textContent = getScheduleRulesFromData(data);
+    rulesEl.hidden = false;
   }
 
   empty.hidden = true;
@@ -311,7 +328,10 @@ function updateNextMatchAlert() {
   }
   const next = getAllMatches(data)
     .filter((m) => m.status === 'pending' && m.p1Id && m.p2Id)
-    .sort((a, b) => (PHASE_ORDER[a.phase] ?? 9) - (PHASE_ORDER[b.phase] ?? 9))
+    .sort((a, b) => {
+      const priorityDiff = (b.queuePriority || 0) - (a.queuePriority || 0);
+      return priorityDiff || (PHASE_ORDER[a.phase] ?? 9) - (PHASE_ORDER[b.phase] ?? 9);
+    })
     .find((m) => matchInvolvesName(m, data, state.search));
 
   if (next) {

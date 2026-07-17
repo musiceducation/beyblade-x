@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { PHASE_LABELS, SessionData } from '@/lib/constants';
+import { PHASE_LABELS, SessionData, DEFAULT_SCHEDULE_RULES } from '@/lib/constants';
 import MatchCard from '@/components/MatchCard';
 import {
   PhaseFilter,
@@ -76,6 +76,9 @@ export default function ScheduleTab({ sessionData, sessionLabel, search }: Props
           <strong>{sessionLabel}</strong>
           <span>{stats.done}/{stats.total} 場 · {stats.pct}%</span>
         </div>
+        <p className="schedule-rules">
+          {(sessionData.scheduleRules || '').trim() || DEFAULT_SCHEDULE_RULES}
+        </p>
         <div className="schedule-progress-bar" role="progressbar" aria-valuenow={stats.pct} aria-valuemin={0} aria-valuemax={100}>
           <div className="schedule-progress-bar-fill" style={{ width: `${stats.pct}%` }} />
         </div>

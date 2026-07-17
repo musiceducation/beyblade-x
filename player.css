@@ -212,6 +212,16 @@ body {
 
 .schedule-progress strong { color: var(--text); }
 
+.schedule-rules {
+  margin: 0 0 0.75rem;
+  padding: 0.65rem 0.75rem;
+  background: var(--bg-card);
+  border-radius: 8px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
 .schedule-list {
   display: flex;
   flex-direction: column;

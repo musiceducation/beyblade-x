@@ -20,6 +20,7 @@ const SESSION_LABELS = {
 };
 
 const MATCH_TARGET_KEY = 'bex-match-target';
+const CAM_MIRROR_KEY = 'bex-cam-mirror';
 const DEFAULT_MATCH_TARGET = 4;
 
 function getMatchTarget() {
@@ -1012,6 +1013,7 @@ async function enterCameraZoomMode() {
     cameraLaunchActive = true;
     document.body.classList.add('launch-active');
     showExitLaunchButton();
+    updateCamMirrorButton();
     await enterBrowserFullscreen();
     if (LAUNCH_ZOOM_MS > 0) {
       await new Promise((resolve) => setTimeout(resolve, LAUNCH_ZOOM_MS));
@@ -1338,6 +1340,7 @@ function exitCameraLaunchMode(options = {}) {
 
   hideExitLaunchButton();
   hideLiveReplayButton();
+  updateCamMirrorButton();
   resetLaunchFx();
   if (launchOverlayHideTimer) {
     clearTimeout(launchOverlayHideTimer);
@@ -2607,6 +2610,7 @@ function attachRemoteStream(remoteStream) {
   state.cameraStream = remoteStream;
   const video = $('#camera-feed');
   video.srcObject = remoteStream;
+  applyMirror();
 
   const markFeedReady = () => {
     // #region agent log
@@ -2877,6 +2881,47 @@ async function updateLocalhostWarn() {
   }
 }
 
+function isCameraMirrorEnabled() {
+  const stored = localStorage.getItem(CAM_MIRROR_KEY);
+  if (stored === null) return true;
+  return stored === '1';
+}
+
+function setCameraMirrorEnabled(on) {
+  localStorage.setItem(CAM_MIRROR_KEY, on ? '1' : '0');
+  const checkbox = $('#cam-mirror');
+  if (checkbox) checkbox.checked = on;
+  applyMirror();
+}
+
+function canMirrorCameraMode() {
+  return state.cameraMode !== 'remote' && state.cameraMode !== 'dji';
+}
+
+function applyMirror() {
+  const mirror = canMirrorCameraMode() && isCameraMirrorEnabled();
+  const video = $('#camera-feed');
+  const img = $('#camera-feed-img');
+  video?.classList.toggle('mirrored', mirror);
+  img?.classList.toggle('mirrored', mirror);
+  const mirrorWrap = $('#cam-mirror-wrap');
+  if (mirrorWrap) mirrorWrap.hidden = !canMirrorCameraMode();
+  updateCamMirrorButton();
+}
+
+function updateCamMirrorButton() {
+  const btn = $('#btn-cam-mirror');
+  if (!btn) return;
+  const inLaunch = document.body.classList.contains('launch-active');
+  const hasFeed = $('#camera-feed')?.classList.contains('active')
+    || ($('#camera-feed-img') && !$('#camera-feed-img').hidden);
+  const show = inLaunch && canMirrorCameraMode() && hasFeed;
+  btn.hidden = !show;
+  const active = show && isCameraMirrorEnabled();
+  btn.classList.toggle('is-active', active);
+  btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+}
+
 function updateCamSourcePanels() {
   const mode = $('#cam-source').value;
   state.cameraMode = mode;
@@ -2884,6 +2929,7 @@ function updateCamSourcePanels() {
   $('#cam-remote-panel').hidden = mode !== 'remote';
   $('#cam-dji-panel').hidden = mode !== 'dji';
   $('#cam-url-panel').hidden = mode !== 'url';
+  applyMirror();
   if (mode === 'remote') {
     redirectHostToLanIfNeeded().then((stay) => {
       if (!stay) return;
@@ -2916,6 +2962,7 @@ function showCameraActive(useVideo) {
   $('#btn-cam-start').disabled = true;
   $('#btn-cam-stop').disabled = false;
   updateRemoteCamButtons();
+  applyMirror();
   if (typeof onCameraFeedActive === 'function') onCameraFeedActive();
 }
 
@@ -2933,6 +2980,7 @@ function hideCameraFeed() {
   $('#btn-cam-start').disabled = false;
   $('#btn-cam-stop').disabled = true;
   updateRemoteCamButtons();
+  updateCamMirrorButton();
   if (typeof onCameraFeedStopped === 'function') onCameraFeedStopped();
 }
 
@@ -3533,6 +3581,16 @@ function init() {
 
   $('#btn-cam-start').addEventListener('click', startCamera);
   $('#btn-cam-stop').addEventListener('click', () => stopCamera());
+  const camMirror = $('#cam-mirror');
+  if (camMirror) {
+    camMirror.checked = isCameraMirrorEnabled();
+    camMirror.addEventListener('change', () => {
+      setCameraMirrorEnabled(camMirror.checked);
+    });
+  }
+  $('#btn-cam-mirror')?.addEventListener('click', () => {
+    setCameraMirrorEnabled(!isCameraMirrorEnabled());
+  });
   $('#cam-source').addEventListener('change', () => {
     sessionStorage.setItem('cam-source-pref', $('#cam-source').value);
     updateCamSourcePanels();
@@ -3699,6 +3757,8 @@ function init() {
     addLog(`切換至 ${getSessionLabel()}`);
     const overlayLink = $('#overlay-link');
     if (overlayLink) overlayLink.href = `overlay.html?session=${$('#session-select').value}`;
+    const awardsLink = $('#awards-link');
+    if (awardsLink) awardsLink.href = `awards.html?session=${$('#session-select').value}`;
     pushArenaLiveState();
   });
   $('#phase-select').addEventListener('change', () => {

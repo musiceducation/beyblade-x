@@ -121,8 +121,6 @@ function quarterMatches(data: SessionData | null): Match[] {
 export function getQuarterSlotChampion(slot: Match | null | undefined): string | null {
   if (!slot) return null;
   if (slot.status === 'done' && slot.winnerId) return slot.winnerId;
-  if (slot.p1Id && !slot.p2Id) return slot.p1Id;
-  if (!slot.p1Id && slot.p2Id) return slot.p2Id;
   return null;
 }
 
@@ -138,10 +136,9 @@ export function getQuarterByePlayerIds(data: SessionData | null): { slotIndex: n
 }
 
 function isQuarterComplete(data: SessionData | null): boolean {
-  const dualMatches = quarterMatches(data).filter((m) => m.p1Id && m.p2Id);
-  const singleSlots = quarterMatches(data).filter((m) => (m.p1Id && !m.p2Id) || (!m.p1Id && m.p2Id));
-  if (!dualMatches.length && !singleSlots.length) return false;
-  return dualMatches.every((m) => m.status === 'done' && m.winnerId);
+  const occupied = quarterMatches(data).filter((m) => m.p1Id || m.p2Id);
+  if (!occupied.length) return false;
+  return occupied.every((m) => m.status === 'done' && m.winnerId);
 }
 
 function isRevivalComplete(data: SessionData | null): boolean {
@@ -266,6 +263,10 @@ export function matchStatusLabel(status: ReturnType<typeof matchStatus>) {
 
 export function sortMatches(matches: Match[]) {
   return [...matches].sort((a, b) => {
+    const priorityA = a.status === 'pending' ? a.queuePriority || 0 : 0;
+    const priorityB = b.status === 'pending' ? b.queuePriority || 0 : 0;
+    const priorityDiff = priorityB - priorityA;
+    if (priorityDiff !== 0) return priorityDiff;
     const phaseDiff = (PHASE_ORDER[a.phase] ?? 9) - (PHASE_ORDER[b.phase] ?? 9);
     if (phaseDiff !== 0) return phaseDiff;
     if (a.phase === 'prelim' && b.phase === 'prelim') {

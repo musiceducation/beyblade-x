@@ -51,6 +51,8 @@
 
   <button id="btn-exit-launch" class="btn-exit-launch" type="button" hidden aria-label="返回賽程">✕ 賽程</button>
 
+  <button id="btn-cam-mirror" class="btn-cam-mirror" type="button" hidden aria-pressed="true" title="左右鏡像鏡頭畫面（本機／URL）">鏡像</button>
+
   <button id="btn-live-replay" class="btn-live-replay" type="button" hidden title="爭議時立即重播本局（含現場收音）">
     <span class="btn-live-replay-round">第 <span id="live-replay-battle-num">1</span> 局</span>
     <span class="btn-live-replay-label">重播</span>
@@ -249,7 +251,20 @@
           <input id="restore-tournament-file" type="file" accept="application/json,.json" hidden>
         </div>
       </div>
-      <p class="tournament-rundown">比賽流程：初賽 → 復活賽（僅初賽落敗）→ 複賽（落敗直接淘汰）→ 四強挑戰 → 準決賽 → 決賽 · 無季軍戰 · 賽程表可直接改分、設勝負、雙擊進入計分</p>
+      <div class="tournament-rundown-wrap">
+        <p id="tournament-rundown" class="tournament-rundown" aria-live="polite"></p>
+        <details class="schedule-rules-edit" id="schedule-rules-edit">
+          <summary class="schedule-rules-edit-toggle">自訂規定</summary>
+          <div class="schedule-rules-edit-panel">
+            <textarea id="schedule-rules-input" rows="3" maxlength="500" placeholder="比賽流程、淘汰規則、操作提示…"></textarea>
+            <div class="schedule-rules-edit-actions">
+              <button id="btn-save-schedule-rules" class="btn btn-sm btn-primary" type="button">儲存</button>
+              <button id="btn-reset-schedule-rules" class="btn btn-sm btn-ghost" type="button">還原預設</button>
+            </div>
+            <p class="schedule-rules-edit-hint">親子組／公開組各自獨立 · 會同步至選手查閱與分享賽程</p>
+          </div>
+        </details>
+      </div>
       <aside class="player-qr-card" id="player-qr-card" aria-label="選手查閱 QR">
         <div class="player-qr-card-inner">
           <img id="player-qr" class="player-qr-img" alt="選手查閱 QR" width="140" height="140" hidden>
@@ -260,6 +275,7 @@
             <div class="player-qr-actions">
               <button id="btn-copy-player-link" class="btn btn-sm btn-ghost" type="button">複製連結</button>
               <a id="overlay-link" href="overlay.html?session=junior" class="btn btn-sm btn-ghost" target="_blank" rel="noopener">OBS 投影</a>
+              <a id="awards-link" href="awards.html?session=junior" class="btn btn-sm btn-ghost" target="_blank" rel="noopener">頒獎背景</a>
               <details class="player-qr-more">
                 <summary class="btn btn-sm btn-ghost">現場工具 ▾</summary>
                 <div class="player-qr-more-panel">
@@ -322,6 +338,9 @@
             </select>
             <button id="btn-cam-start" class="btn btn-sm btn-primary" data-label-local="連接鏡頭" data-label-remote="等待手機 QR…">連接鏡頭</button>
             <button id="btn-cam-stop" class="btn btn-sm btn-ghost" disabled>停止</button>
+            <label class="toggle" id="cam-mirror-wrap">
+              <input type="checkbox" id="cam-mirror" checked> 鏡像
+            </label>
           </div>
         </div>
         <div id="cam-local-panel" class="cam-sub-panel">

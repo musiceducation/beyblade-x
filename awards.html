@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>咩咩遊樂園 — 頒獎典禮</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;800;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="awards.css">
+</head>
+<body>
+  <div class="awards-stage">
+    <div class="awards-bg" aria-hidden="true">
+      <div class="awards-rays"></div>
+      <div class="awards-spotlight awards-spotlight--left"></div>
+      <div class="awards-spotlight awards-spotlight--center"></div>
+      <div class="awards-spotlight awards-spotlight--right"></div>
+      <div class="awards-sparkles"></div>
+      <div class="awards-floor-glow"></div>
+    </div>
+
+    <header class="awards-header">
+      <p class="awards-venue">咩咩遊樂園</p>
+      <h1 class="awards-title">頒獎典禮</h1>
+      <span id="awards-session" class="awards-session">親子組</span>
+    </header>
+
+    <main id="awards-content" class="awards-content" aria-live="polite"></main>
+
+    <footer class="awards-footer">
+      <p id="awards-status" class="awards-status">同步賽程中…</p>
+    </footer>
+  </div>
+
+  <script src="arena-shared.js"></script>
+  <script src="awards.js"></script>
+</body>
+</html>
