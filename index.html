@@ -94,11 +94,38 @@
       <button id="btn-shortcuts-help" class="btn btn-ghost" type="button" title="快捷鍵（?）">?</button>
       <button id="btn-event-checklist" class="btn btn-ghost" type="button" title="開賽檢查">✅</button>
       <button id="btn-admin-settings" class="btn btn-ghost" type="button" title="管理設定">⚙</button>
+      <button id="btn-platform-room" class="btn btn-ghost" type="button" title="連接雲端房">☁</button>
+      <span id="platform-room-badge" class="platform-room-badge" hidden></span>
       <button id="btn-reset-match" class="btn btn-ghost" type="button">重置對戰</button>
     </div>
   </header>
 
   <button type="button" id="arena-sync-banner" class="arena-sync-banner" hidden aria-live="polite"></button>
+
+  <details id="platform-room-panel" class="platform-room-panel">
+    <summary>連接雲端比賽房（開房平台）</summary>
+    <form id="platform-room-form" class="platform-room-form">
+      <label>
+        房號
+        <input id="platform-room-code" type="text" maxlength="8" placeholder="例如 AB12CD" autocomplete="off" required>
+      </label>
+      <label>
+        裁判密碼
+        <input id="platform-room-password" type="password" minlength="4" placeholder="開房時設定的密碼" required>
+      </label>
+      <label>
+        平台網址
+        <input id="platform-room-api" type="url" placeholder="http://localhost:3000 或 Vercel 網址">
+      </label>
+      <div class="platform-room-actions">
+        <button type="submit" class="btn btn-primary">連接</button>
+        <button type="button" id="btn-platform-room-pull" class="btn btn-ghost">下載賽程</button>
+        <button type="button" id="btn-platform-room-push" class="btn btn-ghost">上傳賽程</button>
+        <button type="button" id="btn-platform-room-unbind" class="btn btn-ghost">斷開</button>
+      </div>
+      <p id="platform-room-status" class="platform-room-status">未連接雲端房</p>
+    </form>
+  </details>
 
   <nav class="app-nav" aria-label="主界面">
     <button type="button" class="app-nav-btn active" data-view="battle">⚔ 對戰計分</button>
@@ -672,6 +699,7 @@
   <script src="arena-match-lock.js"></script>
   <script src="arena-broadcast.js"></script>
   <script src="supabase-sync.js"></script>
+  <script src="room-sync.js"></script>
   <script src="tournament.js"></script>
   <script src="replay.js"></script>
   <script src="arena-admin.js"></script>

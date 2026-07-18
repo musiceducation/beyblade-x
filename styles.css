@@ -5313,6 +5313,66 @@ body.launch-active.launch-live .score-adjust { display: none; }
   border: 1px solid rgba(255, 69, 58, 0.35);
   color: #ff453a;
 }
+
+.platform-room-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  background: rgba(0, 212, 255, 0.15);
+  border: 1px solid rgba(0, 212, 255, 0.35);
+  color: var(--blue, #00d4ff);
+  white-space: nowrap;
+}
+.platform-room-badge[hidden] { display: none; }
+
+.platform-room-panel {
+  margin: 0 1rem 0.65rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(14, 20, 32, 0.92);
+}
+.platform-room-panel > summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--gold, #ffd60a);
+}
+.platform-room-form {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.65rem;
+}
+.platform-room-form label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--muted, #8b95a8);
+}
+.platform-room-form input {
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.28);
+  color: inherit;
+  font: inherit;
+}
+.platform-room-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.platform-room-status {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted, #8b95a8);
+}
+.platform-room-status[data-ok="1"] { color: var(--green, #34c759); }
+.platform-room-status[data-ok="0"] { color: var(--red, #ff2d55); }
+
 .header-broadcast {
   display: flex;
   gap: 0.35rem;

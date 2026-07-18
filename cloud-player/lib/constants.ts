@@ -47,7 +47,8 @@ export const DEFAULT_SCHEDULE_RULES = '比賽流程：初賽 → 復活賽（僅
 export type SessionData = {
   players: Player[];
   drawn: boolean;
-  matches: Record<string, Match | Match[] | Record<string, string[]>>;
+  matches: Record<string, Match | Match[] | string[] | Record<string, string[]>>;
+  eliminatedIds?: string[];
   revivalWinnerId?: string | null;
   activeMatchId?: string | null;
   scheduleRules?: string;

@@ -26,7 +26,7 @@ export default function LiveTab({ sessionData, search, liveOverlay, sessionKey }
   const arenaFresh = liveOverlay?.active
     && liveOverlay.updatedAt
     && liveOverlay.session === sessionKey
-    && (Date.now() - liveOverlay.updatedAt) < 30000
+    && (Date.now() - liveOverlay.updatedAt) < 60000
     && !liveOverlay.matchOver;
 
   const active = matches.find((m) => m.id === sessionData?.activeMatchId);

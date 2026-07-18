@@ -1,0 +1,64 @@
+{
+  "expo": {
+    "name": "BEYBATTLE",
+    "slug": "beybattle",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "beybattle",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#070b12"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.miemie.beybattle",
+      "infoPlist": {
+        "NSCameraUsageDescription": "BEYBATTLE 需要相機以錄製對戰畫面，供戰鬥回放與爭議重播。",
+        "NSMicrophoneUsageDescription": "BEYBATTLE 需要麥克風以錄製對戰現場收音，供回放使用。",
+        "NSPhotoLibraryUsageDescription": "BEYBATTLE 可將回放短片儲存至相簿。"
+      }
+    },
+    "android": {
+      "package": "com.miemie.beybattle",
+      "adaptiveIcon": {
+        "backgroundColor": "#070b12",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "允許 BEYBATTLE 使用相機錄製對戰回放",
+          "microphonePermission": "允許 BEYBATTLE 錄音以供回放",
+          "recordAudioAndroid": true
+        }
+      ],
+      "expo-sharing"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "replace-with-eas-project-id"
+      }
+    }
+  }
+}

@@ -2,6 +2,8 @@
 
 場內主機 push 賽程／回放到 Supabase；選手用 **Vercel 固定網址** 查閱（4G、唔同 Wi‑Fi 都得）。
 
+**比賽平台（開房／入房，不需 Mac）**：另執行 [`schema-rooms.sql`](./schema-rooms.sql)，並見 [`cloud-player/PLATFORM.md`](../cloud-player/PLATFORM.md)。
+
 ## 1. Supabase
 
 1. 建立專案 → [supabase.com](https://supabase.com)

@@ -27,9 +27,18 @@ export type PrelimRoundColumn = {
 
 const QUARTER_ENTRANTS = 8;
 
+function asMatchArray(value: SessionData['matches'][string] | undefined): Match[] {
+  if (!Array.isArray(value) || (value.length > 0 && typeof value[0] === 'string')) return [];
+  return value as Match[];
+}
+
+function asSingleMatch(value: SessionData['matches'][string] | undefined): Match | null {
+  if (!value || Array.isArray(value) || typeof value !== 'object') return null;
+  return value as Match;
+}
+
 function prelimMatches(data: SessionData | null): Match[] {
-  const prelim = data?.matches?.prelim;
-  return Array.isArray(prelim) ? prelim : [];
+  return asMatchArray(data?.matches?.prelim);
 }
 
 function prelimByeMap(data: SessionData | null): Record<string, string[]> {
@@ -114,8 +123,7 @@ export function playerName(data: SessionData | null, id?: string | null) {
 }
 
 function quarterMatches(data: SessionData | null): Match[] {
-  const quarter = data?.matches?.quarter;
-  return Array.isArray(quarter) ? quarter : [];
+  return asMatchArray(data?.matches?.quarter);
 }
 
 export function getQuarterSlotChampion(slot: Match | null | undefined): string | null {
@@ -144,21 +152,20 @@ function isQuarterComplete(data: SessionData | null): boolean {
 function isRevivalComplete(data: SessionData | null): boolean {
   if (!data?.matches) return false;
   if (data.revivalWinnerId) return true;
-  const rev = data.matches.revival;
-  if (!Array.isArray(rev) || !rev.length) return false;
+  const rev = asMatchArray(data.matches.revival);
+  if (!rev.length) return false;
   return rev.some((m) => m.label === '逆轉小羊決賽' && m.status === 'done' && m.winnerId)
     || Boolean(data.revivalWinnerId);
 }
 
 function needsRevivalPath(data: SessionData | null): boolean {
-  const rev = data?.matches?.revival;
-  return Array.isArray(rev) && rev.length > 0;
+  return asMatchArray(data?.matches?.revival).length > 0;
 }
 
 function isChallengeComplete(data: SessionData | null): boolean {
   if (!data?.revivalWinnerId) return true;
-  const ch = data.matches?.challenge as Match | undefined;
-  return ch?.status === 'done' && !!ch.winnerId;
+  const ch = asSingleMatch(data.matches?.challenge);
+  return Boolean(ch?.status === 'done' && ch.winnerId);
 }
 
 export function isOfficialTopFourReady(data: SessionData | null): boolean {
@@ -174,7 +181,7 @@ export function getOfficialTopFour(data: SessionData | null): (string | null)[] 
   if (!isOfficialTopFourReady(data)) return null;
   const quarters = quarterMatches(data);
   const topFour = quarters.slice(0, 4).map(getQuarterSlotChampion);
-  const challenge = data?.matches?.challenge as Match | undefined;
+  const challenge = asSingleMatch(data?.matches?.challenge);
 
   if (data?.revivalWinnerId && challenge?.status === 'done') {
     const challengedId = challenge.p2Id;
@@ -190,14 +197,13 @@ export function getOfficialTopFour(data: SessionData | null): (string | null)[] 
 export function getAllMatches(data: SessionData | null): Match[] {
   const m = data?.matches;
   if (!m) return [];
-  const prelim = Array.isArray(m.prelim) ? m.prelim : [];
   return [
-    ...prelim,
+    ...asMatchArray(m.prelim),
     ...quarterMatches(data),
-    ...((m.revival as Match[]) || []),
-    ...(m.challenge ? [m.challenge as Match] : []),
-    ...((m.semi as Match[]) || []),
-    ...(m.final ? [m.final as Match] : []),
+    ...asMatchArray(m.revival),
+    ...(asSingleMatch(m.challenge) ? [asSingleMatch(m.challenge)!] : []),
+    ...asMatchArray(m.semi),
+    ...(asSingleMatch(m.final) ? [asSingleMatch(m.final)!] : []),
   ];
 }
 
@@ -344,13 +350,13 @@ export type SessionAwards = {
 
 export function computeAwards(data: SessionData | null): SessionAwards | null {
   if (!data?.matches) return null;
-  const fin = data.matches.final as Match | undefined;
+  const fin = asSingleMatch(data.matches.final);
   if (!fin?.winnerId) return null;
   const champion = playerName(data, fin.winnerId);
   const runnerId = fin.winnerId === fin.p1Id ? fin.p2Id : fin.p1Id;
   const runnerUp = playerName(data, runnerId);
   const officialTopFour = getOfficialTopFour(data)?.filter(Boolean) as string[] | null;
-  const semis = ((data.matches.semi as Match[]) || []).map((m) => m.winnerId).filter(Boolean);
+  const semis = asMatchArray(data.matches.semi).map((m) => m.winnerId).filter(Boolean);
   const top4Ids = officialTopFour?.length
     ? officialTopFour
     : [...new Set([...semis, fin.p1Id, fin.p2Id].filter(Boolean))] as string[];

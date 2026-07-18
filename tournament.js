@@ -476,6 +476,9 @@ function persistSession(options = {}) {
   if (!skipPush && typeof scheduleCloudTournamentPush === 'function') {
     scheduleCloudTournamentPush();
   }
+  if (!skipPush && typeof scheduleRoomSessionPush === 'function') {
+    scheduleRoomSessionPush();
+  }
 }
 
 function loadSession(session) {
@@ -1718,6 +1721,9 @@ function updateTournamentLiveScores(scores, battles) {
   match.liveBattles = battles;
   renderTournamentUI({ scrollActive: false });
   scheduleLiveSync();
+  if (typeof scheduleRoomLiveScores === 'function') {
+    scheduleRoomLiveScores(scores, battles);
+  }
 }
 
 function setChallengeOpponent(quarterIndex) {
@@ -1896,6 +1902,9 @@ async function loadMatchToScoreboard(matchId) {
 
   renderTournamentUI();
   persistSession();
+  if (typeof roomSetActive === 'function') {
+    roomSetActive(matchId).catch(() => {});
+  }
   const scoreHint = match.scores ? ` · 戰績 <span class="log-score">${match.scores[0]} : ${match.scores[1]}</span>` : '';
   addLog(`── ${match.label} ──`, 'system', { type: 'log-section' });
   addLog(
@@ -1930,8 +1939,9 @@ function onTournamentMatchWin(winnerSide, result) {
   const match = findMatch(tournamentState.activeMatchId);
   if (!match) return;
 
+  const matchId = tournamentState.activeMatchId;
   const side = resolveWinnerSide(match, winnerSide);
-  const ok = recordMatchWinner(tournamentState.activeMatchId, side, result);
+  const ok = recordMatchWinner(matchId, side, result);
   if (ok) {
     const wName = playerName(side === 1 ? match.p1Id : match.p2Id);
     const lName = playerName(side === 1 ? match.p2Id : match.p1Id);
@@ -1951,6 +1961,9 @@ function onTournamentMatchWin(winnerSide, result) {
       addLog(`${escapeHtml(wName)} 晉級 · ${escapeHtml(lName)} 復活賽止步`, 'system');
     } else {
       addLog(`${escapeHtml(wName)} 晉級 · ${escapeHtml(lName)} 止步`, 'system');
+    }
+    if (typeof roomRecordWinner === 'function') {
+      roomRecordWinner(matchId, side, scores, battles).catch(() => {});
     }
     tournamentState.activeMatchId = null;
     persistSession();
@@ -2517,9 +2530,17 @@ function initTournament() {
   const sessionSelect = $('#session-select');
   loadSession(sessionSelect?.value || 'junior');
   initTournamentSync();
+  if (typeof wireRoomBindUi === 'function') wireRoomBindUi();
+  if (typeof initRoomSyncFromQuery === 'function') initRoomSyncFromQuery();
 
   sessionSelect?.addEventListener('change', () => {
     loadSession(sessionSelect.value);
+    if (typeof roomSync !== 'undefined' && roomSync?.enabled) {
+      roomSync.session = sessionSelect.value === 'senior' ? 'senior' : 'junior';
+      if (typeof applyRoomSessionToLocal === 'function') {
+        applyRoomSessionToLocal().catch(() => {});
+      }
+    }
   });
 
   $('#btn-add-player')?.addEventListener('click', () => {
