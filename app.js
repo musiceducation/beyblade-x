@@ -1,6 +1,5 @@
 /**
- * 咩咩遊樂園 — Beyblade X 陀螺競賽
- * Scoring, live camera, and visual effects
+ * BEYBATTLE — scoring, live camera, and visual effects
  */
 
 const LAUNCH_SEQUENCE = ['Three', 'Two', 'One', 'Go Shoot!'];
@@ -15,8 +14,8 @@ const PHASE_LABELS = {
 };
 
 const SESSION_LABELS = {
-  junior: '第一場 親子組（6–12歲）',
-  senior: '第二場 公開組（12歲+）',
+  junior: 'A 組',
+  senior: 'B 組',
 };
 
 const MATCH_TARGET_KEY = 'bex-match-target';
@@ -337,7 +336,7 @@ function exportBattleLog() {
     if (line.includes('擊飛')) stats.over += 1;
     if (line.includes('極致')) stats.extreme += 1;
   });
-  const header = `咩咩遊樂園 戰報\n${new Date().toLocaleString()}\n\n`;
+  const header = `BEYBATTLE 戰報\n\n`;
   const summary = `統計 — 殘存:${stats.spin} 爆裂:${stats.burst} 擊飛:${stats.over} 極致:${stats.extreme}\n\n`;
   downloadBlob(
     `beyblade-log-${Date.now()}.txt`,
@@ -3824,7 +3823,7 @@ function init() {
     $('#cam-source').value = camPref;
   }
 
-  addLog(`歡迎來到咩咩遊樂園陀螺競賽 — ${getSessionLabel()} · ${getPhaseLabel()}`);
+  addLog(`歡迎來到 BEYBATTLE — ${getSessionLabel()} · ${getPhaseLabel()}`);
   addLog(`官方規則：整場 Match 累積計分，先取 ${getMatchTarget()} 分者勝`);
   addLog('得分判定：極致收尾 +3 · 擊飛／爆裂結局 +2 · 殘存結局 +1');
   addLog('國際對決口令：Three, Two, One, Go Shoot!');

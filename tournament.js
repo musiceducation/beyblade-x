@@ -301,7 +301,7 @@ function exportTournamentCsv() {
   ['junior', 'senior'].forEach((sessionKey) => {
     const data = all[sessionKey];
     if (!data?.matches?.prelim) return;
-    const sessionLabel = sessionKey === 'junior' ? '親子組' : '公開組';
+    const sessionLabel = sessionKey === 'junior' ? 'A 組' : 'B 組';
     getAllMatches(data).forEach((m) => {
       const p1 = data.players?.find((p) => p.id === m.p1Id)?.name || '待定';
       const p2 = data.players?.find((p) => p.id === m.p2Id)?.name || '待定';
@@ -1639,7 +1639,7 @@ function exportPrintableBracket() {
   ['junior', 'senior'].forEach((sk) => {
     const data = all[sk];
     if (!data?.drawn) return;
-    const label = sk === 'junior' ? '親子組' : '公開組';
+    const label = sk === 'junior' ? 'A 組' : 'B 組';
     rows.push(`<h2>${label}</h2><table><thead><tr><th>場次</th><th>對戰</th><th>比分</th><th>勝者</th></tr></thead><tbody>`);
     getAllMatches(data).forEach((m) => {
       const p1 = data.players?.find((p) => p.id === m.p1Id)?.name || '—';
@@ -1655,18 +1655,18 @@ function exportPrintableBracket() {
   win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>賽程表</title>
     <style>body{font-family:system-ui;padding:1.5rem}table{border-collapse:collapse;width:100%;margin-bottom:2rem}
     th,td{border:1px solid #ccc;padding:8px;text-align:left}h2{margin-top:1.5rem}</style></head><body>
-    <h1>咩咩遊樂園 — 賽程表</h1><p>${new Date().toLocaleString()}</p><p>${escapeHtml(getScheduleRules())}</p>${rows.join('')}
+    <h1>BEYBATTLE — 賽程表</h1><p>${escapeHtml(getScheduleRules())}</p>${rows.join('')}
     <script>window.onload=function(){window.print()}<\/script></body></html>`);
   win.document.close();
 }
 
 function exportStatsReport() {
   const all = loadTournamentStorage();
-  const lines = ['咩咩遊樂園 — 賽後統計', new Date().toLocaleString(), ''];
+  const lines = ['BEYBATTLE — 賽後統計', ''];
   ['junior', 'senior'].forEach((sk) => {
     const data = all[sk];
     if (!data?.players?.length) return;
-    lines.push(sk === 'junior' ? '【親子組】' : '【公開組】');
+    lines.push(sk === 'junior' ? '【A 組】' : '【B 組】');
     const stats = new Map(data.players.map((p) => [p.id, { name: p.name, w: 0, l: 0 }]));
     getAllMatches(data).forEach((m) => {
       if (m.status !== 'done' || !m.winnerId) return;
@@ -1684,7 +1684,7 @@ function exportStatsReport() {
 
 function exportAwardsList() {
   const all = loadTournamentStorage();
-  const lines = ['咩咩遊樂園 — 頒獎名單', new Date().toLocaleString(), ''];
+  const lines = ['BEYBATTLE — 頒獎名單', ''];
   ['junior', 'senior'].forEach((sk) => {
     const data = all[sk];
     const fin = data?.matches?.final;
@@ -1693,7 +1693,7 @@ function exportAwardsList() {
     const runner = fin.winnerId === fin.p1Id ? playerNameFromData(data, fin.p2Id) : playerNameFromData(data, fin.p1Id);
     const semis = (data.matches.semi || []).map((m) => m.winnerId).filter(Boolean);
     const top4 = [...new Set([...semis, fin.p1Id, fin.p2Id].filter(Boolean))];
-    lines.push(sk === 'junior' ? '【親子組】' : '【公開組】');
+    lines.push(sk === 'junior' ? '【A 組】' : '【B 組】');
     lines.push(`冠軍：${champ}`);
     lines.push(`亞軍：${runner}`);
     lines.push(`四強：${top4.map((id) => playerNameFromData(data, id)).join('、')}`);

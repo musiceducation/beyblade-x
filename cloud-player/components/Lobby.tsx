@@ -103,7 +103,7 @@ export default function Lobby({ onEntered }: Props) {
     <div className="lobby-shell">
       <header className="lobby-hero">
         <span className="player-brand-mark">X</span>
-        <h1>咩咩遊樂園</h1>
+        <h1>BEYBATTLE</h1>
         <p>開房比賽 · 入房號觀戰／參賽</p>
       </header>
 

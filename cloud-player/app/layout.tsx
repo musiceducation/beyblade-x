@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: '咩咩遊樂園 — 開房比賽',
+  title: 'BEYBATTLE',
   description: '開房、入房號、名單、賽程與計分',
   appleWebApp: { capable: true, statusBarStyle: 'black-translucent' },
 };

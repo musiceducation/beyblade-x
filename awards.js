@@ -1,6 +1,6 @@
 const $ = (sel) => document.querySelector(sel);
 
-const SESSION_LABELS = { junior: '親子組', senior: '公開組' };
+const SESSION_LABELS = { junior: 'A 組', senior: 'B 組' };
 
 const params = new URLSearchParams(location.search);
 let session = params.get('session') || 'junior';

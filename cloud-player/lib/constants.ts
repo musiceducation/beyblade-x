@@ -17,8 +17,8 @@ export const PHASE_ORDER: Record<string, number> = {
 };
 
 export const SESSION_LABELS: Record<string, string> = {
-  junior: '第一場 親子組',
-  senior: '第二場 公開組',
+  junior: 'A 組',
+  senior: 'B 組',
 };
 
 export const POLL_MS = 1500;

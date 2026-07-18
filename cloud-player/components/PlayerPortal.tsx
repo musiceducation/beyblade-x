@@ -143,7 +143,7 @@ export default function PlayerPortal() {
           <div className="player-brand">
             <span className="player-brand-mark">X</span>
             <div>
-              <h1>咩咩遊樂園</h1>
+              <h1>BEYBATTLE</h1>
               <p className="player-subtitle">雲端賽程 · 比分 · 回放</p>
             </div>
           </div>

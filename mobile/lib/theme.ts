@@ -12,8 +12,8 @@ export const colors = {
 };
 
 export const SESSION_LABELS = {
-  junior: '第一場 親子組',
-  senior: '第二場 公開組',
+  junior: 'A 組',
+  senior: 'B 組',
 } as const;
 
 export const PHASE_LABELS: Record<string, string> = {

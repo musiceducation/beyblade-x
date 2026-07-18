@@ -31,3 +31,16 @@ export function getAllMatches(data: SessionData | null): Match[] {
 export function readyMatches(data: SessionData | null): Match[] {
   return getAllMatches(data).filter((m) => m.status === 'pending' && m.p1Id && m.p2Id);
 }
+
+export function sessionStats(matches: Match[]) {
+  const playable = matches.filter((m) => m.p1Id && m.p2Id);
+  const total = playable.length;
+  const done = playable.filter((m) => m.status === 'done').length;
+  const pending = playable.filter((m) => m.status === 'pending').length;
+  return {
+    total,
+    done,
+    pending,
+    pct: total ? Math.round((done / total) * 100) : 0,
+  };
+}
