@@ -9,7 +9,7 @@ import { getAllMatches } from '@/lib/tournament';
 import { colors } from '@/lib/theme';
 
 export default function CameraScreen() {
-  const { session, sessionData, sessionKey, isReferee } = useRoom();
+  const { session, sessionData, isReferee } = useRoom();
   const cameraRef = useRef<CameraView>(null);
   const [camPerm, requestCam] = useCameraPermissions();
   const [micPerm, requestMic] = useMicrophonePermissions();
@@ -98,7 +98,7 @@ export default function CameraScreen() {
 
   return (
     <Screen style={styles.screen}>
-      <Muted>錄製對戰 → 自動上傳雲端（房 {session?.code} · {sessionKey}）</Muted>
+      <Muted>錄製對戰 → 自動上傳雲端（房 {session?.code}）</Muted>
       <View style={styles.preview}>
         {camPerm?.granted ? (
           <CameraView

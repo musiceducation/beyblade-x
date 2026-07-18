@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { SESSION_LABELS } from '@/lib/constants';
 import LiveTab from '@/components/LiveTab';
 import ReplayTab from '@/components/ReplayTab';
 import ResultsTab from '@/components/ResultsTab';
@@ -28,7 +27,7 @@ function formatUpdatedAt(date: Date | null) {
 
 export default function PlayerPortal() {
   const [tab, setTab] = useState<Tab>('live');
-  const [session, setSession] = useState('junior');
+  const [session] = useState('junior');
   const [search, setSearch] = useState('');
   const [activeReplayId, setActiveReplayId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -53,23 +52,13 @@ export default function PlayerPortal() {
     window.history.replaceState({}, '', url);
   }, []);
 
-  const setSessionWithUrl = useCallback((next: string) => {
-    setSession(next);
-    if (typeof window === 'undefined') return;
-    const url = new URL(window.location.href);
-    url.searchParams.set('session', next);
-    window.history.replaceState({}, '', url);
-  }, []);
-
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     const urlTab = params.get('tab');
-    const urlSession = params.get('session');
     const replayId = params.get('replay');
     const follow = params.get('follow');
     if (urlTab === 'live' || urlTab === 'schedule' || urlTab === 'replay' || urlTab === 'results') setTab(urlTab);
-    if (urlSession === 'junior' || urlSession === 'senior') setSession(urlSession);
     if (follow) setSearch(follow);
     else {
       const saved = getSavedFollowName();
@@ -172,20 +161,6 @@ export default function PlayerPortal() {
           <p className="player-cache-banner">目前顯示離線快取，連線恢復後會自動更新</p>
         )}
 
-        <div className="session-pills" role="tablist" aria-label="場次">
-          {(['junior', 'senior'] as const).map((key) => (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              className={`session-pill${session === key ? ' active' : ''}`}
-              onClick={() => setSessionWithUrl(key)}
-            >
-              {SESSION_LABELS[key]}
-            </button>
-          ))}
-        </div>
-
         <div className="player-toolbar">
           <input
             type="search"
@@ -254,14 +229,14 @@ export default function PlayerPortal() {
         {tab === 'schedule' && (
           <ScheduleTab
             sessionData={sessionData}
-            sessionLabel={SESSION_LABELS[session]}
+            sessionLabel="BEYBATTLE"
             search={search}
           />
         )}
         {tab === 'results' && (
           <ResultsTab
             sessionData={sessionData}
-            sessionLabel={SESSION_LABELS[session]}
+            sessionLabel="BEYBATTLE"
             search={search}
           />
         )}

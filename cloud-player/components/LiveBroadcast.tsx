@@ -1,8 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { PHASE_LABELS, SESSION_LABELS, SessionData } from '@/lib/constants';
+import { PHASE_LABELS, SessionData } from '@/lib/constants';
 import { getAllMatches, playerName, sortMatches } from '@/lib/tournament';
+
+type RoomReplay = {
+  id: string;
+  match_id: string | null;
+  battle_num: number | null;
+  metadata: Record<string, unknown>;
+  has_video: boolean;
+  videoUrl: string | null;
+};
 
 type RoomPublic = {
   code: string;
@@ -28,16 +37,23 @@ type Props = {
   sessionParam?: string;
 };
 
-export default function LiveBroadcast({ code, sessionParam }: Props) {
+export default function LiveBroadcast({ code }: Props) {
   const [room, setRoom] = useState<RoomPublic | null>(null);
+  const [replays, setReplays] = useState<RoomReplay[]>([]);
   const [error, setError] = useState('');
-  const session = sessionParam === 'senior' ? 'senior' : 'junior';
 
   const load = useCallback(async () => {
-    const res = await fetch(`/api/rooms/${encodeURIComponent(code)}`, { cache: 'no-store' });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || '讀取失敗');
-    setRoom(data.room);
+    const [roomRes, replayRes] = await Promise.all([
+      fetch(`/api/rooms/${encodeURIComponent(code)}`, { cache: 'no-store' }),
+      fetch(`/api/rooms/${encodeURIComponent(code)}/replays`, { cache: 'no-store' }),
+    ]);
+    const roomData = await roomRes.json();
+    if (!roomRes.ok) throw new Error(roomData.error || '讀取失敗');
+    setRoom(roomData.room);
+    if (replayRes.ok) {
+      const replayData = await replayRes.json();
+      setReplays((replayData.replays || []) as RoomReplay[]);
+    }
   }, [code]);
 
   useEffect(() => {
@@ -51,18 +67,18 @@ export default function LiveBroadcast({ code, sessionParam }: Props) {
       }
     };
     tick();
-    const id = window.setInterval(tick, 1500);
+    const id = window.setInterval(tick, 2000);
     return () => {
       cancelled = true;
       window.clearInterval(id);
     };
   }, [load]);
 
-  const sessionData = room?.[session] || null;
+  const sessionData = room?.junior || null;
   const live = room?.live;
   const liveFresh = Boolean(
     live?.active
-    && live.session === session
+    && live.session === 'junior'
     && live.updatedAt
     && Date.now() - live.updatedAt < 60000
     && !live.matchOver,
@@ -72,6 +88,17 @@ export default function LiveBroadcast({ code, sessionParam }: Props) {
     const m = getAllMatches(sessionData).find((x) => x.id === sessionData?.activeMatchId);
     return m?.p1Id && m?.p2Id ? m : null;
   }, [sessionData]);
+
+  const activeMatchId = sessionData?.activeMatchId || null;
+  const cameraReplay = useMemo(() => {
+    const withVideo = replays.filter((r) => r.has_video && r.videoUrl);
+    if (!withVideo.length) return null;
+    if (activeMatchId) {
+      const matchReplay = withVideo.find((r) => r.match_id === activeMatchId);
+      if (matchReplay) return matchReplay;
+    }
+    return withVideo[0];
+  }, [activeMatchId, replays]);
 
   const upcoming = useMemo(() =>
     sortMatches(
@@ -94,18 +121,38 @@ export default function LiveBroadcast({ code, sessionParam }: Props) {
 
   return (
     <div className="broadcast-shell">
-      <div className="broadcast-card">
+      <div className="broadcast-card broadcast-card--wide">
         <header className="broadcast-header">
+          <span className="broadcast-brand">BEYBATTLE</span>
           <span className="broadcast-room">{code}</span>
-          <span className="broadcast-session">{SESSION_LABELS[session]}</span>
           {label && <span className="broadcast-phase">{label}</span>}
         </header>
 
         {error && <p className="broadcast-error">{error}</p>}
 
+        {cameraReplay?.videoUrl ? (
+          <section className="broadcast-camera" aria-label="對戰鏡頭">
+            <video
+              key={cameraReplay.id}
+              className="broadcast-camera-video"
+              src={cameraReplay.videoUrl}
+              controls
+              playsInline
+              autoPlay
+              muted
+            />
+            <p className="broadcast-camera-caption">
+              {String(cameraReplay.metadata?.matchLabel || '對戰')}
+              {cameraReplay.battle_num ? ` · 第 ${cameraReplay.battle_num} 局` : ''}
+            </p>
+          </section>
+        ) : (
+          <p className="broadcast-empty">等待對戰鏡頭…</p>
+        )}
+
         {hasLive ? (
           <section className="broadcast-live">
-            <p className="broadcast-label">進行中</p>
+            <p className="broadcast-label">即時比分</p>
             <div className="broadcast-scores">
               <div className="broadcast-player broadcast-player--red">
                 <span>{p1Name}</span>
@@ -121,9 +168,7 @@ export default function LiveBroadcast({ code, sessionParam }: Props) {
               {battle ? `第 ${battle} 局` : '比賽進行中'}
             </p>
           </section>
-        ) : (
-          <p className="broadcast-empty">等待對戰…</p>
-        )}
+        ) : null}
 
         {upcoming.length > 0 && (
           <section className="broadcast-next">

@@ -39,7 +39,7 @@ export default function ResultsTab({ sessionData, sessionLabel, search }: Props)
     <div className="results-panel">
       {awards && (
         <section className="results-awards" aria-label="頒獎名單">
-          <h2 className="results-section-title">🏆 {sessionLabel} · 頒獎</h2>
+          <h2 className="results-section-title">🏆 頒獎</h2>
           <ul className="results-award-list">
             <li><span className="results-award-rank">冠軍</span> {awards.champion}</li>
             <li><span className="results-award-rank">亞軍</span> {awards.runnerUp}</li>

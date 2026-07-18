@@ -34,7 +34,7 @@ export default function RoomLayout() {
       <Tabs.Screen
         name="live"
         options={{
-          title: '即時',
+          title: '直播',
           tabBarIcon: ({ color }) => <Text style={{ color }}>◉</Text>,
         }}
       />

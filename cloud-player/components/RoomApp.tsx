@@ -1,13 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { SESSION_LABELS, SessionData } from '@/lib/constants';
+import { SessionData } from '@/lib/constants';
 import { getAllMatches, playerName } from '@/lib/tournament';
 import LiveTab from '@/components/LiveTab';
 import ScheduleTab from '@/components/ScheduleTab';
 import ResultsTab from '@/components/ResultsTab';
 import RefereePanel from '@/components/RefereePanel';
 import BattleScoreboard from '@/components/BattleScoreboard';
+import RoomReplayTab from '@/components/RoomReplayTab';
 
 type RoomPublic = {
   code: string;
@@ -28,27 +29,24 @@ type Props = {
   initialTab?: Tab;
 };
 
-type Tab = 'live' | 'schedule' | 'results' | 'referee' | 'battle';
+type Tab = 'live' | 'schedule' | 'results' | 'replay' | 'referee' | 'battle';
 
 const MAC_ARENA_KEY = 'bex-mac-arena-url';
+const SESSION: 'junior' = 'junior';
 
 export default function RoomApp({
   code,
   refereeToken,
-  playerId,
   playerName: initialName,
   onLeave,
-  onPlayerUpdated,
   initialTab,
 }: Props) {
   const [room, setRoom] = useState<RoomPublic | null>(null);
-  const [session, setSession] = useState<'junior' | 'senior'>('junior');
   const [tab, setTab] = useState<Tab>(
     initialTab || (refereeToken ? 'battle' : 'live'),
   );
   const [error, setError] = useState('');
-  const [nameDraft, setNameDraft] = useState(initialName);
-  const [renameBusy, setRenameBusy] = useState(false);
+  const [search, setSearch] = useState('');
   const [macArenaUrl, setMacArenaUrl] = useState('');
 
   const isReferee = Boolean(refereeToken);
@@ -87,7 +85,7 @@ export default function RoomApp({
     };
   }, [loadRoom]);
 
-  const sessionData = room?.[session] || null;
+  const sessionData = room?.[SESSION] || null;
 
   const patch = useCallback(async (body: Record<string, unknown>) => {
     const res = await fetch(`/api/rooms/${encodeURIComponent(code)}`, {
@@ -96,31 +94,13 @@ export default function RoomApp({
         'Content-Type': 'application/json',
         ...(refereeToken ? { 'x-referee-token': refereeToken } : {}),
       },
-      body: JSON.stringify({ session, ...body }),
+      body: JSON.stringify({ session: SESSION, ...body }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '操作失敗');
     setRoom(data.room);
     return data;
-  }, [code, refereeToken, session]);
-
-  const renameSelf = async () => {
-    if (!playerId) return;
-    setRenameBusy(true);
-    setError('');
-    try {
-      const data = await patch({
-        action: 'player_rename',
-        playerId,
-        name: nameDraft,
-      });
-      if (data.player) onPlayerUpdated(data.player.id, data.player.name);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '改名失敗');
-    } finally {
-      setRenameBusy(false);
-    }
-  };
+  }, [code, refereeToken]);
 
   const pendingCount = useMemo(() => {
     return getAllMatches(sessionData).filter((m) => m.status === 'pending' && m.p1Id && m.p2Id).length;
@@ -141,9 +121,10 @@ export default function RoomApp({
 
   const tabs: { id: Tab; label: string; show: boolean }[] = [
     { id: 'battle', label: '對戰計分', show: isReferee },
-    { id: 'live', label: '即時', show: true },
+    { id: 'live', label: '直播', show: true },
     { id: 'schedule', label: '賽程', show: true },
     { id: 'results', label: '成績', show: true },
+    { id: 'replay', label: '回放', show: true },
     { id: 'referee', label: '裁判', show: isReferee },
   ];
 
@@ -152,13 +133,13 @@ export default function RoomApp({
       <header className="room-header">
         <div className="room-header-top">
           <div>
-            <p className="room-code-label">房號</p>
+            <p className="room-code-label">BEYBATTLE · 房號</p>
             <h1 className="room-code">{code}</h1>
           </div>
           <div className="room-header-actions">
             <a
               className="room-live-link"
-              href={`/live/${encodeURIComponent(code)}?session=${session}`}
+              href={`/live/${encodeURIComponent(code)}`}
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -171,7 +152,7 @@ export default function RoomApp({
         </div>
         <div className="room-meta-row">
           {isReferee ? <span className="room-badge room-badge--ref">裁判模式</span> : (
-            <span className="room-badge">玩家</span>
+            <span className="room-badge">{initialName || '玩家'}</span>
           )}
           {room && (
             <span className="room-rev">rev {room.revision}</span>
@@ -180,34 +161,20 @@ export default function RoomApp({
 
         <div className="player-toolbar room-rename-row">
           <input
+            type="search"
             className="player-search"
-            value={nameDraft}
-            onChange={(e) => setNameDraft(e.target.value)}
-            maxLength={16}
-            placeholder="你的名字"
-            aria-label="改名"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="搜尋選手…"
+            aria-label="搜尋選手"
           />
           <button
             type="button"
             className="lobby-submit room-rename-btn"
-            disabled={renameBusy || !playerId}
-            onClick={renameSelf}
+            onClick={() => setSearch((s) => s.trim())}
           >
-            改名
+            尋找
           </button>
-        </div>
-
-        <div className="session-pills" role="tablist" aria-label="場次">
-          {(['junior', 'senior'] as const).map((key) => (
-            <button
-              key={key}
-              type="button"
-              className={`session-pill${session === key ? ' active' : ''}`}
-              onClick={() => setSession(key)}
-            >
-              {SESSION_LABELS[key]}
-            </button>
-          ))}
         </div>
 
         {isReferee && (
@@ -269,24 +236,27 @@ export default function RoomApp({
         {room && tab === 'live' && (
           <LiveTab
             sessionData={sessionData}
-            search={nameDraft}
+            search={search}
             liveOverlay={room.live as never}
-            sessionKey={session}
+            sessionKey={SESSION}
           />
         )}
         {room && tab === 'schedule' && (
           <ScheduleTab
             sessionData={sessionData}
-            sessionLabel={SESSION_LABELS[session]}
-            search={nameDraft}
+            sessionLabel="BEYBATTLE"
+            search={search}
           />
         )}
         {room && tab === 'results' && (
           <ResultsTab
             sessionData={sessionData}
-            sessionLabel={SESSION_LABELS[session]}
-            search={nameDraft}
+            sessionLabel="BEYBATTLE"
+            search={search}
           />
+        )}
+        {room && tab === 'replay' && (
+          <RoomReplayTab code={code} search={search} />
         )}
         {room && tab === 'referee' && isReferee && (
           <RefereePanel
