@@ -1,10 +1,21 @@
-import { useCallback, useEffect, useState } from 'react';
-import { FlatList, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  FlatList,
+  Image,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
+import { WebView } from 'react-native-webview';
 import { Screen, Muted, ErrorText } from '@/components/ui';
 import { useRoom } from '@/lib/room-context';
 import { getAllMatches, playerName, sessionStats } from '@/lib/tournament';
 import { listCloudReplays, CloudReplay } from '@/lib/replay-upload';
+import { getApiBase } from '@/lib/rooms-api';
 import { ArenaLiveState } from '@/lib/types';
 import { PHASE_LABELS, colors } from '@/lib/theme';
 
@@ -30,8 +41,10 @@ function pickCameraReplay(replays: CloudReplay[], activeMatchId: string | null) 
 
 export default function LiveScreen() {
   const { session, sessionData, room, error } = useRoom();
+  const { height: windowHeight } = useWindowDimensions();
   const overlay = (room?.live || null) as ArenaLiveState | null;
   const [replays, setReplays] = useState<CloudReplay[]>([]);
+  const [fullscreen, setFullscreen] = useState(false);
   const matches = getAllMatches(sessionData);
   const stats = sessionStats(matches);
   const active = matches.find((m) => m.id === sessionData?.activeMatchId);
@@ -46,6 +59,21 @@ export default function LiveScreen() {
     .slice(-3)
     .reverse();
   const fresh = isFreshOverlay(overlay);
+  const webrtcLive = Boolean(overlay?.webrtcLive);
+  const streamUri = useMemo(
+    () => (session?.code ? `${getApiBase()}/stream/${encodeURIComponent(session.code)}` : null),
+    [session?.code],
+  );
+  const liveFrameFresh = Boolean(
+    !webrtcLive
+    && overlay?.cameraFrameUrl
+    && overlay.cameraUpdatedAt
+    && Date.now() - overlay.cameraUpdatedAt < 15000,
+  );
+  const liveFrameUri = liveFrameFresh && overlay?.cameraFrameUrl
+    ? `${overlay.cameraFrameUrl}?t=${overlay.cameraUpdatedAt}`
+    : null;
+  const hasLiveVideo = Boolean(webrtcLive && streamUri) || Boolean(liveFrameUri) || Boolean(cameraReplay?.videoUrl);
 
   const loadReplays = useCallback(async () => {
     if (!session?.code) return;
@@ -78,29 +106,84 @@ export default function LiveScreen() {
     ? overlay?.battle
     : activeValid?.liveBattles || activeValid?.battles;
 
+  const caption = webrtcLive
+    ? `即時直播中${overlay?.webrtcMode === 'screen' ? ' · 畫面分享' : ' · 對戰鏡頭'} · 含聲音`
+    : liveFrameUri
+      ? '直播中 · 對戰鏡頭'
+      : cameraReplay
+        ? `${String(cameraReplay.metadata?.matchLabel || '對戰')}${cameraReplay.battle_num ? ` · 第 ${cameraReplay.battle_num} 局` : ''}`
+        : '';
+
+  const renderStream = (tall: boolean) => {
+    if (webrtcLive && streamUri) {
+      return (
+        <WebView
+          source={{ uri: streamUri }}
+          style={tall ? styles.cameraVideoFull : styles.cameraVideo}
+          allowsInlineMediaPlayback
+          mediaPlaybackRequiresUserAction={false}
+          javaScriptEnabled
+          domStorageEnabled
+          allowsFullscreenVideo
+        />
+      );
+    }
+    if (liveFrameUri) {
+      return (
+        <Image
+          source={{ uri: liveFrameUri }}
+          style={tall ? styles.cameraVideoFull : styles.cameraVideo}
+          resizeMode="contain"
+        />
+      );
+    }
+    if (cameraReplay?.videoUrl) {
+      return (
+        <Video
+          key={cameraReplay.id}
+          source={{ uri: cameraReplay.videoUrl }}
+          style={tall ? styles.cameraVideoFull : styles.cameraVideo}
+          useNativeControls
+          resizeMode={ResizeMode.CONTAIN}
+          shouldPlay
+          isMuted={false}
+        />
+      );
+    }
+    return null;
+  };
+
   return (
     <Screen>
       <ErrorText>{error}</ErrorText>
 
-      {cameraReplay?.videoUrl ? (
+      {hasLiveVideo ? (
         <View style={styles.cameraWrap}>
-          <Video
-            key={cameraReplay.id}
-            source={{ uri: cameraReplay.videoUrl }}
-            style={styles.cameraVideo}
-            useNativeControls
-            resizeMode={ResizeMode.CONTAIN}
-            shouldPlay
-            isMuted
-          />
-          <Text style={styles.cameraCaption}>
-            {String(cameraReplay.metadata?.matchLabel || '對戰')}
-            {cameraReplay.battle_num ? ` · 第 ${cameraReplay.battle_num} 局` : ''}
-          </Text>
+          {renderStream(false)}
+          <View style={styles.cameraBar}>
+            <Text style={styles.cameraCaption}>{caption}</Text>
+            <Pressable style={styles.fsBtn} onPress={() => setFullscreen(true)}>
+              <Text style={styles.fsBtnText}>全螢幕</Text>
+            </Pressable>
+          </View>
         </View>
       ) : (
-        <Muted>等待對戰鏡頭 — 裁判可在「鏡頭」錄製</Muted>
+        <Muted>等待對戰鏡頭 — 裁判請在「鏡頭」按「即時直播 / 分享畫面」</Muted>
       )}
+
+      <Modal
+        visible={fullscreen}
+        animationType="fade"
+        supportedOrientations={['portrait', 'landscape']}
+        onRequestClose={() => setFullscreen(false)}
+      >
+        <View style={[styles.fsShell, { minHeight: windowHeight }]}>
+          <View style={styles.fsVideoWrap}>{renderStream(true)}</View>
+          <Pressable style={styles.fsClose} onPress={() => setFullscreen(false)}>
+            <Text style={styles.fsBtnText}>縮回</Text>
+          </Pressable>
+        </View>
+      </Modal>
 
       {!sessionData?.drawn ? (
         <Muted>尚未抽籤 — 賽程建立後會顯示即時比分</Muted>
@@ -195,11 +278,45 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   cameraVideo: { width: '100%', height: 220 },
+  cameraVideoFull: { width: '100%', flex: 1, backgroundColor: '#000' },
+  cameraBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    backgroundColor: colors.card,
+  },
   cameraCaption: {
+    flex: 1,
     color: colors.muted,
     fontSize: 12,
-    padding: 8,
-    backgroundColor: colors.card,
+  },
+  fsBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.bg,
+  },
+  fsBtnText: { color: colors.gold, fontWeight: '800', fontSize: 12 },
+  fsShell: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  fsVideoWrap: { flex: 1 },
+  fsClose: {
+    position: 'absolute',
+    top: 48,
+    right: 16,
+    zIndex: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
   },
   summary: {
     flexDirection: 'row',

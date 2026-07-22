@@ -17,8 +17,8 @@ export const PHASE_ORDER: Record<string, number> = {
 };
 
 export const SESSION_LABELS: Record<string, string> = {
-  junior: 'A 組',
-  senior: 'B 組',
+  junior: 'BEYBATTLE',
+  senior: 'BEYBATTLE',
 };
 
 export const POLL_MS = 1500;
@@ -68,6 +68,14 @@ export type ArenaLiveState = {
   broadcastStatus?: 'live' | 'break' | 'delay' | string;
   broadcastMessage?: string;
   stationName?: string;
+  cameraFrameUrl?: string;
+  cameraUpdatedAt?: number;
+  webrtcLive?: boolean;
+  webrtcMode?: 'camera' | 'screen' | string;
+  finishSide?: 1 | 2;
+  finishType?: string;
+  finishPts?: number;
+  finishAt?: number;
 };
 
 export type ArenaStateRow = {

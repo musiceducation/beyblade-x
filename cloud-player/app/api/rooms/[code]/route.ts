@@ -14,13 +14,14 @@ import {
   setLiveScores,
 } from '@/lib/tournament-engine';
 import { buildRoomLiveOverlay } from '@/lib/room-live';
+import { mergeRoomLiveState } from '@/lib/room-live-frame';
 import { getAllMatches } from '@/lib/tournament';
 import { jsonWithCors, optionsResponse } from '@/lib/cors';
 
 type Ctx = { params: Promise<{ code: string }> };
 
-function sessionKey(raw: unknown): 'junior' | 'senior' {
-  return raw === 'senior' ? 'senior' : 'junior';
+function sessionKey(_raw: unknown): 'junior' {
+  return 'junior';
 }
 
 export async function OPTIONS(req: NextRequest) {
@@ -100,7 +101,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       break;
     case 'reset_schedule':
       result = resetSchedule(sessionData);
-      live = { updatedAt: Date.now(), session, active: false, matchOver: true, broadcastStatus: 'live' };
+      live = mergeRoomLiveState(row.live, { updatedAt: Date.now(), session, active: false, matchOver: true, broadcastStatus: 'live' });
       break;
     case 'replace_session': {
       const incoming = body.sessionData as SessionData | undefined;
@@ -111,8 +112,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       result = replaceSessionData(sessionData, incoming);
       if (result.ok) {
         live = sessionData.activeMatchId
-          ? buildRoomLiveOverlay(session, sessionData, { matchId: sessionData.activeMatchId })
-          : { updatedAt: Date.now(), session, active: false, matchOver: true, broadcastStatus: 'live' };
+          ? mergeRoomLiveState(row.live, buildRoomLiveOverlay(session, sessionData, { matchId: sessionData.activeMatchId }))
+          : mergeRoomLiveState(row.live, { updatedAt: Date.now(), session, active: false, matchOver: true, broadcastStatus: 'live' });
       }
       break;
     }
@@ -125,7 +126,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       const matchId = String(body.matchId || '');
       result = recordMatchWinner(sessionData, matchId, side, scores, battles);
       if (result.ok) {
-        live = buildRoomLiveOverlay(session, sessionData, { matchId, matchOver: true });
+        live = mergeRoomLiveState(row.live, buildRoomLiveOverlay(session, sessionData, { matchId, matchOver: true }));
         const autoAdvance = body.autoAdvance !== false;
         if (autoAdvance) {
           const nextReady = getAllMatches(sessionData).find((m) => m.status === 'pending' && m.p1Id && m.p2Id);
@@ -140,8 +141,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       result = setActiveMatch(sessionData, body.matchId ? String(body.matchId) : null);
       if (result.ok) {
         live = body.matchId
-          ? buildRoomLiveOverlay(session, sessionData, { matchId: String(body.matchId) })
-          : { updatedAt: Date.now(), session, active: false, matchOver: true, broadcastStatus: 'live' };
+          ? mergeRoomLiveState(row.live, buildRoomLiveOverlay(session, sessionData, { matchId: String(body.matchId) }))
+          : mergeRoomLiveState(row.live, { updatedAt: Date.now(), session, active: false, matchOver: true, broadcastStatus: 'live' });
       }
       break;
     case 'set_live_scores': {
@@ -153,8 +154,27 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       const battles = body.battles != null ? Number(body.battles) : undefined;
       result = setLiveScores(sessionData, matchId, scores, battles);
       if (result.ok) {
-        live = buildRoomLiveOverlay(session, sessionData, { matchId });
+        const overlay = buildRoomLiveOverlay(session, sessionData, { matchId });
+        const finishSide = body.finishSide === 2 ? 2 : body.finishSide === 1 ? 1 : null;
+        if (finishSide && body.finishType) {
+          overlay.finishSide = finishSide;
+          overlay.finishType = String(body.finishType);
+          overlay.finishPts = Number(body.finishPts) || 1;
+          overlay.finishAt = Date.now();
+        }
+        live = mergeRoomLiveState(row.live, overlay);
       }
+      break;
+    }
+    case 'set_webrtc_live': {
+      const prev = (row.live || {}) as ArenaLiveState;
+      live = mergeRoomLiveState(prev, {
+        ...prev,
+        updatedAt: Date.now(),
+        webrtcLive: Boolean(body.active),
+        webrtcMode: body.mode === 'screen' ? 'screen' : 'camera',
+      });
+      result = { ok: true };
       break;
     }
     default:

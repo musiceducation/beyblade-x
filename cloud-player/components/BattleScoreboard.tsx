@@ -83,13 +83,21 @@ export default function BattleScoreboard({ sessionData, onAction, playerLabel }:
     }
   };
 
-  const pushLive = (nextScores: [number, number], nextBattle: number, id: string) => {
+  const pushLive = (
+    nextScores: [number, number],
+    nextBattle: number,
+    id: string,
+    finish?: { side: 1 | 2; type: FinishType; pts: number },
+  ) => {
     if (syncTimer.current) window.clearTimeout(syncTimer.current);
     syncTimer.current = window.setTimeout(() => {
       run('set_live_scores', {
         matchId: id,
         scores: nextScores,
         battles: nextBattle,
+        ...(finish
+          ? { finishSide: finish.side, finishType: finish.type, finishPts: finish.pts }
+          : {}),
       }).catch(() => {});
     }, 160);
   };
@@ -122,7 +130,9 @@ export default function BattleScoreboard({ sessionData, onAction, playerLabel }:
     setScores(next);
     setBattle(nextBattle);
     if (entry) setHistory((h) => [...h, entry]);
-    pushLive(next, nextBattle, activeMatch.id);
+    pushLive(next, nextBattle, activeMatch.id, entry
+      ? { side: entry.player, type: entry.type, pts: entry.pts }
+      : undefined);
 
     if (next[0] >= target || next[1] >= target) {
       const winnerSide: 1 | 2 = next[0] >= target ? 1 : 2;

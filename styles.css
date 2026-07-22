@@ -4466,37 +4466,48 @@ body.replay-theater-active .finish-announce {
 
 .btn-cam-mirror {
   position: fixed;
-  top: max(0.75rem, env(safe-area-inset-top));
-  left: max(0.75rem, env(safe-area-inset-left));
-  z-index: 1150;
+  bottom: max(0.55rem, env(safe-area-inset-bottom));
+  left: max(0.55rem, env(safe-area-inset-left));
+  top: auto;
+  z-index: 1140;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-family: var(--font-body);
-  font-size: 0.8rem;
-  font-weight: 700;
-  padding: 0.45rem 0.75rem;
-  border: 2px solid rgba(255, 255, 255, 0.35);
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1;
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.55);
-  color: rgba(255, 255, 255, 0.75);
+  background: rgba(0, 0, 0, 0.28);
+  color: rgba(255, 255, 255, 0.45);
   cursor: pointer;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  opacity: 0.55;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
 }
 
 .btn-cam-mirror[hidden] { display: none; }
 
 .btn-cam-mirror.is-active {
-  border-color: rgba(0, 212, 255, 0.75);
-  background: rgba(0, 212, 255, 0.22);
-  color: #fff;
+  border-color: rgba(0, 212, 255, 0.4);
+  background: rgba(0, 212, 255, 0.12);
+  color: rgba(180, 235, 255, 0.85);
+  opacity: 0.75;
 }
 
 .btn-cam-mirror:active {
-  transform: scale(0.97);
+  transform: scale(0.94);
+  opacity: 0.9;
 }
 
 body.launch-active.launch-live .btn-cam-mirror {
-  top: calc(max(0.75rem, env(safe-area-inset-top)) + 2.6rem);
+  top: auto;
+  bottom: max(0.55rem, env(safe-area-inset-bottom));
 }
 
 .btn-exit-launch:active {
@@ -4518,7 +4529,11 @@ body.launch-active.launch-live .btn-cam-mirror {
   .btn-relaunch:hover:not(:disabled) { filter: brightness(1.12); transform: translateY(-1px); }
   .btn-icon:hover { color: var(--red); }
   .btn-exit-launch:hover { background: rgba(255, 45, 85, 0.5); border-color: var(--red); }
-  .btn-cam-mirror:hover { border-color: rgba(0, 212, 255, 0.65); color: #fff; }
+  .btn-cam-mirror:hover {
+    opacity: 0.9;
+    border-color: rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.8);
+  }
 }
 
 /* ─── Touch active feedback (all devices) ─── */

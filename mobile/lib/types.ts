@@ -38,6 +38,10 @@ export type ArenaLiveState = {
   active?: boolean;
   broadcastStatus?: string;
   broadcastMessage?: string;
+  cameraFrameUrl?: string;
+  cameraUpdatedAt?: number;
+  webrtcLive?: boolean;
+  webrtcMode?: 'camera' | 'screen' | string;
 };
 
 export type PublicRoom = {

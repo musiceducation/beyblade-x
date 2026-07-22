@@ -12,8 +12,8 @@ export const colors = {
 };
 
 export const SESSION_LABELS = {
-  junior: 'A 組',
-  senior: 'B 組',
+  junior: 'BEYBATTLE',
+  senior: 'BEYBATTLE',
 } as const;
 
 export const PHASE_LABELS: Record<string, string> = {

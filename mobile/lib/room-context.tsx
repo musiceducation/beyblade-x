@@ -3,12 +3,12 @@ import { getRoom, patchRoom } from './rooms-api';
 import { clearRoomSession, loadRoomSession, saveRoomSession } from './session';
 import { PublicRoom, RoomSession, SessionData } from './types';
 
+const SESSION = 'junior' as const;
+
 type Ctx = {
   ready: boolean;
   session: RoomSession | null;
   room: PublicRoom | null;
-  sessionKey: 'junior' | 'senior';
-  setSessionKey: (k: 'junior' | 'senior') => void;
   sessionData: SessionData | null;
   isReferee: boolean;
   error: string;
@@ -25,7 +25,6 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [session, setSession] = useState<RoomSession | null>(null);
   const [room, setRoom] = useState<PublicRoom | null>(null);
-  const [sessionKey, setSessionKey] = useState<'junior' | 'senior'>('junior');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -75,11 +74,11 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
     if (!session?.code) throw new Error('未入房');
     const data = await patchRoom(
       session.code,
-      { action: act, session: sessionKey, ...payload },
+      { action: act, session: SESSION, ...payload },
       session.refereeToken,
     );
     setRoom(data.room);
-  }, [session, sessionKey]);
+  }, [session]);
 
   const updatePlayer = useCallback(async (playerId: string, playerName: string) => {
     if (!session) return;
@@ -92,9 +91,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
     ready,
     session,
     room,
-    sessionKey,
-    setSessionKey,
-    sessionData: room?.[sessionKey] || null,
+    sessionData: room?.[SESSION] || null,
     isReferee: Boolean(session?.refereeToken),
     error,
     enter,
@@ -103,7 +100,7 @@ export function RoomProvider({ children }: { children: React.ReactNode }) {
     action,
     updatePlayer,
   }), [
-    ready, session, room, sessionKey, error, enter, leave, refresh, action, updatePlayer,
+    ready, session, room, error, enter, leave, refresh, action, updatePlayer,
   ]);
 
   return <RoomContext.Provider value={value}>{children}</RoomContext.Provider>;

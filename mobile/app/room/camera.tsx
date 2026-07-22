@@ -1,10 +1,11 @@
 import { useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Linking, StyleSheet, Text, View } from 'react-native';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { Screen, PrimaryButton, Muted, ErrorText } from '@/components/ui';
 import { useRoom } from '@/lib/room-context';
 import { saveLocalReplay } from '@/lib/replays';
 import { uploadReplayToCloud } from '@/lib/replay-upload';
+import { getApiBase } from '@/lib/rooms-api';
 import { getAllMatches } from '@/lib/tournament';
 import { colors } from '@/lib/theme';
 
@@ -43,6 +44,25 @@ export default function CameraScreen() {
     ? getAllMatches(sessionData).find((m) => m.id === activeMatchId)
     : null;
   const matchLabel = activeMatch?.label || activeMatchId || '對戰';
+
+  const openRealtimePublish = async () => {
+    setError('');
+    if (!session?.refereeToken || !session.code) {
+      setError('缺少裁判憑證');
+      return;
+    }
+    const url =
+      `${getApiBase()}/publish/${encodeURIComponent(session.code)}`
+      + `?token=${encodeURIComponent(session.refereeToken)}`;
+    try {
+      const can = await Linking.canOpenURL(url);
+      if (!can) throw new Error('無法開啟直播頁');
+      await Linking.openURL(url);
+      setStatus('已開啟即時直播頁 · 選「開始鏡頭直播」或「分享畫面」');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '無法開啟即時直播');
+    }
+  };
 
   const start = async () => {
     setError('');
@@ -98,7 +118,9 @@ export default function CameraScreen() {
 
   return (
     <Screen style={styles.screen}>
-      <Muted>錄製對戰 → 自動上傳雲端（房 {session?.code}）</Muted>
+      <Muted>
+        「即時直播」→ 連續畫面（同 Zoom／分享螢幕）· 「開始錄製」→ 回放
+      </Muted>
       <View style={styles.preview}>
         {camPerm?.granted ? (
           <CameraView
@@ -118,6 +140,12 @@ export default function CameraScreen() {
         )}
       </View>
       <View style={styles.actions}>
+        <PrimaryButton
+          label="即時直播 / 分享畫面"
+          tone="gold"
+          disabled={recording || uploading}
+          onPress={openRealtimePublish}
+        />
         {!recording ? (
           <PrimaryButton
             label={uploading ? '上傳中…' : '開始錄製'}

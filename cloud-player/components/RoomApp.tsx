@@ -9,6 +9,7 @@ import ResultsTab from '@/components/ResultsTab';
 import RefereePanel from '@/components/RefereePanel';
 import BattleScoreboard from '@/components/BattleScoreboard';
 import RoomReplayTab from '@/components/RoomReplayTab';
+import RoomLiveCamera from '@/components/RoomLiveCamera';
 
 type RoomPublic = {
   code: string;
@@ -29,7 +30,7 @@ type Props = {
   initialTab?: Tab;
 };
 
-type Tab = 'live' | 'schedule' | 'results' | 'replay' | 'referee' | 'battle';
+type Tab = 'live' | 'schedule' | 'results' | 'replay' | 'camera' | 'referee' | 'battle';
 
 const MAC_ARENA_KEY = 'bex-mac-arena-url';
 const SESSION: 'junior' = 'junior';
@@ -125,6 +126,7 @@ export default function RoomApp({
     { id: 'schedule', label: '賽程', show: true },
     { id: 'results', label: '成績', show: true },
     { id: 'replay', label: '回放', show: true },
+    { id: 'camera', label: '鏡頭', show: isReferee },
     { id: 'referee', label: '裁判', show: isReferee },
   ];
 
@@ -154,6 +156,7 @@ export default function RoomApp({
           {isReferee ? <span className="room-badge room-badge--ref">裁判模式</span> : (
             <span className="room-badge">{initialName || '玩家'}</span>
           )}
+          <span className="room-badge room-badge--session">BEYBATTLE</span>
           {room && (
             <span className="room-rev">rev {room.revision}</span>
           )}
@@ -257,6 +260,9 @@ export default function RoomApp({
         )}
         {room && tab === 'replay' && (
           <RoomReplayTab code={code} search={search} />
+        )}
+        {room && tab === 'camera' && isReferee && refereeToken && (
+          <RoomLiveCamera code={code} refereeToken={refereeToken} />
         )}
         {room && tab === 'referee' && isReferee && (
           <RefereePanel

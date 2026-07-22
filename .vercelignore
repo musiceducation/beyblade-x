@@ -1,0 +1,8 @@
+mobile
+.git
+.cursor
+*.mp3
+*.m4a
+.replays
+arena-config.local.js
+arena-secrets.local.json

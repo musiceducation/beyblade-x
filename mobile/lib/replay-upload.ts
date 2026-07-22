@@ -27,6 +27,27 @@ export async function listCloudReplays(roomCode: string): Promise<CloudReplay[]>
   return (data.replays || []) as CloudReplay[];
 }
 
+export async function uploadLiveFrame(
+  roomCode: string,
+  refereeToken: string,
+  uri: string,
+): Promise<void> {
+  const code = roomCode.toUpperCase();
+  const base = getApiBase();
+  const form = new FormData();
+  form.append('frame', {
+    uri,
+    name: 'live.jpg',
+    type: 'image/jpeg',
+  } as unknown as Blob);
+
+  await parseJson(await fetch(`${base}/api/rooms/${encodeURIComponent(code)}/live-frame`, {
+    method: 'POST',
+    headers: { 'x-referee-token': refereeToken },
+    body: form,
+  }));
+}
+
 export async function uploadReplayToCloud(
   replay: LocalReplay,
   refereeToken: string,
