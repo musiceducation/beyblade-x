@@ -34,6 +34,14 @@ Deep link 範例：
 
 `https://localhost:8443/?platformRoom=房號&refereeToken=TOKEN&roomsApi=http://localhost:3000`
 
+## 疑難排解
+
+| 問題 | 檢查 |
+|------|------|
+| 開房顯示 `TypeError: fetch failed`／無法連線資料庫 | Vercel 的 `NEXT_PUBLIC_SUPABASE_URL` 是否仍指向有效專案（DNS 可解析）；專案是否已暫停／刪除；改完 env 後需 **Redeploy** |
+| `GET /api/health` 回 `rooms: false` | 同上；並確認已執行 `schema-rooms.sql`、`SUPABASE_SERVICE_ROLE_KEY` 正確 |
+| 503 未設定 KEY | 補齊 `NEXT_PUBLIC_SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`、`ROOM_TOKEN_SECRET` |
+
 ## 舊版
 
 - 舊版單活動 Portal：`?legacy=1`

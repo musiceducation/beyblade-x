@@ -1,6 +1,10 @@
 import { NextRequest } from 'next/server';
 import { verifyRefereeToken } from '@/lib/room-auth';
-import { getServiceSupabase } from '@/lib/rooms-server';
+import {
+  formatRoomsDbError,
+  getServiceSupabase,
+  roomsDbConfigError,
+} from '@/lib/rooms-server';
 import {
   listRoomReplays,
   toPublicReplay,
@@ -17,25 +21,44 @@ export async function OPTIONS(req: NextRequest) {
 export async function GET(req: NextRequest, ctx: Ctx) {
   const { code: raw } = await ctx.params;
   const code = raw.toUpperCase();
+  const configError = roomsDbConfigError();
+  if (configError) {
+    return jsonWithCors(req, { error: configError }, { status: 503 });
+  }
   const sb = getServiceSupabase();
   if (!sb) {
     return jsonWithCors(req, { error: '伺服器未設定' }, { status: 503 });
   }
 
-  const { data: room } = await sb.from('rooms').select('code').eq('code', code).maybeSingle();
+  const { data: room, error: roomErr } = await sb
+    .from('rooms')
+    .select('code')
+    .eq('code', code)
+    .maybeSingle();
+  if (roomErr) {
+    return jsonWithCors(req, { error: formatRoomsDbError(roomErr) }, { status: 500 });
+  }
   if (!room) return jsonWithCors(req, { error: '找不到房間' }, { status: 404 });
 
   try {
     const replays = await listRoomReplays(code);
     return jsonWithCors(req, { replays });
   } catch (e) {
-    return jsonWithCors(req, { error: e instanceof Error ? e.message : '讀取回放失敗' }, { status: 500 });
+    return jsonWithCors(
+      req,
+      { error: formatRoomsDbError(e, '讀取回放失敗') },
+      { status: 500 },
+    );
   }
 }
 
 export async function POST(req: NextRequest, ctx: Ctx) {
   const { code: raw } = await ctx.params;
   const code = raw.toUpperCase();
+  const configError = roomsDbConfigError();
+  if (configError) {
+    return jsonWithCors(req, { error: configError }, { status: 503 });
+  }
   const sb = getServiceSupabase();
   if (!sb) {
     return jsonWithCors(req, { error: '伺服器未設定' }, { status: 503 });
@@ -50,7 +73,14 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const id = String(body.id || '').trim();
   if (!id) return jsonWithCors(req, { error: '缺少回放 id' }, { status: 400 });
 
-  const { data: room } = await sb.from('rooms').select('code').eq('code', code).maybeSingle();
+  const { data: room, error: roomErr } = await sb
+    .from('rooms')
+    .select('code')
+    .eq('code', code)
+    .maybeSingle();
+  if (roomErr) {
+    return jsonWithCors(req, { error: formatRoomsDbError(roomErr) }, { status: 500 });
+  }
   if (!room) return jsonWithCors(req, { error: '找不到房間' }, { status: 404 });
 
   try {
@@ -66,6 +96,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     });
     return jsonWithCors(req, { replay: toPublicReplay(row) });
   } catch (e) {
-    return jsonWithCors(req, { error: e instanceof Error ? e.message : '建立回放失敗' }, { status: 500 });
+    return jsonWithCors(
+      req,
+      { error: formatRoomsDbError(e, '建立回放失敗') },
+      { status: 500 },
+    );
   }
 }

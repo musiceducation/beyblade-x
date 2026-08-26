@@ -4,7 +4,14 @@ import {
   hashRefereePassword,
   issueRefereeToken,
 } from '@/lib/room-auth';
-import { emptyRoomPayload, getServiceSupabase, toPublicRoom, RoomRow } from '@/lib/rooms-server';
+import {
+  emptyRoomPayload,
+  formatRoomsDbError,
+  getServiceSupabase,
+  roomsDbConfigError,
+  toPublicRoom,
+  RoomRow,
+} from '@/lib/rooms-server';
 import { jsonWithCors, optionsResponse } from '@/lib/cors';
 
 export async function OPTIONS(req: NextRequest) {
@@ -12,6 +19,11 @@ export async function OPTIONS(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const configError = roomsDbConfigError();
+  if (configError) {
+    return jsonWithCors(req, { error: configError }, { status: 503 });
+  }
+
   const sb = getServiceSupabase();
   if (!sb) {
     return jsonWithCors(
@@ -51,7 +63,11 @@ export async function POST(req: NextRequest) {
       break;
     }
     if (error?.code !== '23505') {
-      return jsonWithCors(req, { error: error?.message || '建立房間失敗' }, { status: 500 });
+      return jsonWithCors(
+        req,
+        { error: formatRoomsDbError(error, '建立房間失敗') },
+        { status: 500 },
+      );
     }
   }
 

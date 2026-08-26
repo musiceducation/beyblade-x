@@ -1,4 +1,4 @@
-import { getServiceSupabase } from '@/lib/rooms-server';
+import { formatRoomsDbError, getServiceSupabase, getSupabaseUrl } from '@/lib/rooms-server';
 
 export type RoomReplayRow = {
   id: string;
@@ -16,7 +16,7 @@ export type PublicRoomReplay = RoomReplayRow & {
 };
 
 function supabaseUrl() {
-  return (process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '').replace(/\/$/, '');
+  return getSupabaseUrl();
 }
 
 export function roomReplayStoragePath(roomCode: string, replayId: string, ext = 'mp4') {
@@ -44,7 +44,7 @@ export async function listRoomReplays(roomCode: string): Promise<PublicRoomRepla
     .select('*')
     .eq('room_code', roomCode.toUpperCase())
     .order('created_at', { ascending: false });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(formatRoomsDbError(error));
   return ((data || []) as RoomReplayRow[]).map(toPublicReplay);
 }
 
@@ -71,14 +71,14 @@ export async function upsertRoomReplayMeta(
   };
 
   const { error } = await sb.from('room_replays').upsert(row, { onConflict: 'id' });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(formatRoomsDbError(error));
 
   const { data, error: readErr } = await sb
     .from('room_replays')
     .select('*')
     .eq('id', payload.id)
     .single();
-  if (readErr) throw new Error(readErr.message);
+  if (readErr) throw new Error(formatRoomsDbError(readErr));
   return data as RoomReplayRow;
 }
 
@@ -100,14 +100,14 @@ export async function uploadRoomReplayVideo(
   const { error: upErr } = await sb.storage
     .from('replay-videos')
     .upload(path, videoBytes, { contentType, upsert: true });
-  if (upErr) throw new Error(upErr.message);
+  if (upErr) throw new Error(formatRoomsDbError(upErr, '上傳影片失敗'));
 
   const { error: patchErr } = await sb
     .from('room_replays')
     .update({ has_video: true, updated_at: new Date().toISOString() })
     .eq('id', replayId)
     .eq('room_code', roomCode.toUpperCase());
-  if (patchErr) throw new Error(patchErr.message);
+  if (patchErr) throw new Error(formatRoomsDbError(patchErr));
 
   return roomReplayPublicUrl(roomCode, replayId, ext);
 }
