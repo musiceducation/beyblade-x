@@ -1,6 +1,11 @@
 import { NextRequest } from 'next/server';
 import { issueRefereeToken, verifyRefereePassword } from '@/lib/room-auth';
-import { getServiceSupabase, RoomRow } from '@/lib/rooms-server';
+import {
+  formatRoomsDbError,
+  getServiceSupabase,
+  RoomRow,
+  roomsDbConfigError,
+} from '@/lib/rooms-server';
 import { jsonWithCors, optionsResponse } from '@/lib/cors';
 
 type Ctx = { params: Promise<{ code: string }> };
@@ -12,6 +17,10 @@ export async function OPTIONS(req: NextRequest) {
 export async function POST(req: NextRequest, ctx: Ctx) {
   const { code: raw } = await ctx.params;
   const code = raw.toUpperCase();
+  const configError = roomsDbConfigError();
+  if (configError) {
+    return jsonWithCors(req, { error: configError }, { status: 503 });
+  }
   const sb = getServiceSupabase();
   if (!sb) {
     return jsonWithCors(req, { error: '伺服器未設定' }, { status: 503 });
@@ -21,7 +30,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const password = String(body.refereePassword || '');
 
   const { data, error } = await sb.from('rooms').select('*').eq('code', code).maybeSingle();
-  if (error) return jsonWithCors(req, { error: error.message }, { status: 500 });
+  if (error) {
+    return jsonWithCors(req, { error: formatRoomsDbError(error) }, { status: 500 });
+  }
   if (!data) return jsonWithCors(req, { error: '找不到房間' }, { status: 404 });
 
   const row = data as RoomRow;

@@ -1,6 +1,11 @@
 import { NextRequest } from 'next/server';
 import { verifyRefereeToken } from '@/lib/room-auth';
-import { getServiceSupabase, RoomRow } from '@/lib/rooms-server';
+import {
+  formatRoomsDbError,
+  getServiceSupabase,
+  RoomRow,
+  roomsDbConfigError,
+} from '@/lib/rooms-server';
 import { SessionData, ArenaLiveState } from '@/lib/constants';
 import {
   addPlayer,
@@ -31,6 +36,10 @@ export async function OPTIONS(req: NextRequest) {
 export async function GET(req: NextRequest, ctx: Ctx) {
   const { code: raw } = await ctx.params;
   const code = raw.toUpperCase();
+  const configError = roomsDbConfigError();
+  if (configError) {
+    return jsonWithCors(req, { error: configError }, { status: 503 });
+  }
   const sb = getServiceSupabase();
   if (!sb) {
     return jsonWithCors(req, { error: '伺服器未設定' }, { status: 503 });
@@ -42,7 +51,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     .eq('code', code)
     .maybeSingle();
 
-  if (error) return jsonWithCors(req, { error: error.message }, { status: 500 });
+  if (error) {
+    return jsonWithCors(req, { error: formatRoomsDbError(error) }, { status: 500 });
+  }
   if (!data) return jsonWithCors(req, { error: '找不到房間' }, { status: 404 });
 
   return jsonWithCors(req, { room: data });
@@ -51,6 +62,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   const { code: raw } = await ctx.params;
   const code = raw.toUpperCase();
+  const configError = roomsDbConfigError();
+  if (configError) {
+    return jsonWithCors(req, { error: configError }, { status: 503 });
+  }
   const sb = getServiceSupabase();
   if (!sb) {
     return jsonWithCors(req, { error: '伺服器未設定' }, { status: 503 });
@@ -62,7 +77,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const token = String(req.headers.get('x-referee-token') || body.refereeToken || '');
 
   const { data, error } = await sb.from('rooms').select('*').eq('code', code).maybeSingle();
-  if (error) return jsonWithCors(req, { error: error.message }, { status: 500 });
+  if (error) {
+    return jsonWithCors(req, { error: formatRoomsDbError(error) }, { status: 500 });
+  }
   if (!data) return jsonWithCors(req, { error: '找不到房間' }, { status: 404 });
 
   const row = data as RoomRow;
@@ -198,7 +215,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     .select('code, revision, updated_at, junior, senior, live, created_at')
     .single();
 
-  if (upErr) return jsonWithCors(req, { error: upErr.message }, { status: 500 });
+  if (upErr) {
+    return jsonWithCors(req, { error: formatRoomsDbError(upErr) }, { status: 500 });
+  }
 
   return jsonWithCors(req, {
     room: updated,
